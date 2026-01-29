@@ -1,6 +1,6 @@
 #!/usr/bin/env r
 #
-# llamar - A simple Claude Code demo using R and menu()
+# llamar - An open-source interactive CLI agent using R and menu()
 #
 # Usage:
 #   r llamar.R
@@ -128,8 +128,8 @@ extract_path <- function(input) {
 
 show_help <- function() {
   cat("
-llamar - Simple Claude Code Demo
-================================
+llamar - Interactive CLI Agent
+==============================
 
 Commands (natural language):
   read <file>       - Display file contents
@@ -217,7 +217,7 @@ llamar <- function() {
   cat(" / __|/ _ \\/ _ \\  _/ -_)\n")
   cat(" \\___\\___/\\___/\\__\\___| R\n")
   cat("\n")
-  cat("A simple Claude Code demo using R and menu()\n")
+  cat("An open-source interactive CLI agent\n")
   cat("Type 'help' for commands, 'quit' to exit.\n\n")
 
   # Set working directory context

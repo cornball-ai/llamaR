@@ -1,6 +1,6 @@
-# llamar
+# llamaR
 
-A simple Claude Code-style demo using R and `menu()`.
+An open-source interactive CLI agent
 
 ## What is this?
 
@@ -40,7 +40,7 @@ Rscript llamar.R
 [Reading: README.md]
    1 | # llamar
    2 |
-   3 | A simple Claude Code-style demo...
+   3 | An open-source interactive CLI agent...
 
 > find *.R
 [Glob: *.R in .]
