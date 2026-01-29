@@ -1,11 +1,11 @@
 #!/usr/bin/env r
 #
-# codeR - A simple Claude Code demo using R and menu()
+# llamar - A simple Claude Code demo using R and menu()
 #
 # Usage:
-#   r codeR.R
+#   r llamar.R
 #   # or
-#   Rscript codeR.R
+#   Rscript llamar.R
 
 # ============================================================================
 # Tool implementations (simulated)
@@ -128,7 +128,7 @@ extract_path <- function(input) {
 
 show_help <- function() {
   cat("
-codeR - Simple Claude Code Demo
+llamar - Simple Claude Code Demo
 ================================
 
 Commands (natural language):
@@ -138,7 +138,7 @@ Commands (natural language):
   run <command>     - Execute shell command
   write <file>      - Write content to file
   help              - Show this help
-  quit/exit         - Exit codeR
+  quit/exit         - Exit llamar
 
 Examples:
   > read README.md
@@ -211,7 +211,7 @@ run_tool <- function(intent, input) {
 # Main REPL
 # ============================================================================
 
-codeR <- function() {
+llamar <- function() {
   cat("\n")
   cat("  ___  ___  ___| |___  \n")
   cat(" / __|/ _ \\/ _ \\  _/ -_)\n")
@@ -244,5 +244,5 @@ codeR <- function() {
 
 # Run if executed directly
 if (!interactive() || identical(environment(), globalenv())) {
-  codeR()
+  llamar()
 }

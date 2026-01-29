@@ -1,4 +1,4 @@
-# codeR
+# llamar
 
 A simple Claude Code-style demo using R and `menu()`.
 
@@ -15,10 +15,10 @@ A minimal example showing how to build an interactive CLI agent in R using:
 
 ```bash
 # With littler
-r codeR.R
+r llamar.R
 
 # Or with Rscript
-Rscript codeR.R
+Rscript llamar.R
 ```
 
 ## Commands
@@ -38,18 +38,18 @@ Rscript codeR.R
 ```
 > read README.md
 [Reading: README.md]
-   1 | # codeR
+   1 | # llamar
    2 |
    3 | A simple Claude Code-style demo...
 
 > find *.R
 [Glob: *.R in .]
-- ./codeR.R
+- ./llamar.R
 ( 1 files)
 
 > search function
 [Grep: function in .]
-./codeR.R:
+./llamar.R:
     12:   tool_read <- function(path) {
     32:   tool_glob <- function(pattern, path = ".") {
     45:   tool_grep <- function(pattern, path = ".") {
@@ -110,7 +110,7 @@ Add to `~/.config/claude-desktop/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "codeR": {
+    "llamar": {
       "command": "r",
       "args": ["/path/to/mcp_server.R"]
     }

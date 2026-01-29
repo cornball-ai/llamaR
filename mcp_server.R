@@ -1,14 +1,14 @@
 #!/usr/bin/env r
 #
 # Minimal MCP server using stdio transport
-# Dependencies: jsonlite, llamaR (optional, for chat)
+# Dependencies: jsonlite, llm.api (optional, for chat)
 #
 
 library(jsonlite)
 
-# Load llamaR if available
-HAS_LLAMAR <- requireNamespace("llamaR", quietly = TRUE)
-if (HAS_LLAMAR) library(llamaR)
+# Load llm.api if available
+HAS_LLAMAR <- requireNamespace("llm.api", quietly = TRUE)
+if (HAS_LLAMAR) library(llm.api)
 
 # ============================================================================
 # Tool definitions
@@ -179,10 +179,10 @@ TOOLS <- list(
     )
   ),
 
-  # Chat (requires llamaR)
+  # Chat (requires llm.api)
   list(
     name = "chat",
-    description = "Chat with an LLM (requires llamaR). Supports ollama, claude, openai providers.",
+    description = "Chat with an LLM (requires llm.api). Supports ollama, claude, openai providers.",
     inputSchema = list(
       type = "object",
       properties = list(
@@ -442,11 +442,11 @@ tool_git_log <- function(args) {
   ok(paste(result, collapse = "\n"))
 }
 
-# Chat (llamaR) ----
+# Chat (llm.api) ----
 
 tool_chat <- function(args) {
   if (!HAS_LLAMAR) {
-    return(err("llamaR not installed. Install with: install.packages('llamaR')"))
+    return(err("llm.api not installed. Install with: install.packages('llm.api')"))
   }
 
   prompt <- args$prompt
@@ -456,7 +456,7 @@ tool_chat <- function(args) {
   temperature <- args$temperature %||% 0.7
 
   tryCatch({
-    result <- llamaR::chat(
+    result <- llm.api::chat(
       prompt = prompt,
       provider = provider,
       model = model,
@@ -472,7 +472,7 @@ tool_chat <- function(args) {
 
 tool_chat_models <- function(args) {
   if (!HAS_LLAMAR) {
-    return(err("llamaR not installed"))
+    return(err("llm.api not installed"))
   }
 
   provider <- args$provider %||% "ollama"
@@ -492,7 +492,7 @@ tool_chat_models <- function(args) {
       })
       ok(result)
     } else if (provider == "local") {
-      models <- llamaR::list_local_models()
+      models <- llm.api::list_local_models()
       if (length(models) == 0) ok("No local models found")
       else ok(paste(basename(models), collapse = "\n"))
     } else {
@@ -556,7 +556,7 @@ handle_request <- function(req) {
     "initialize" = list(
       protocolVersion = "2024-11-05",
       capabilities = list(tools = list()),
-      serverInfo = list(name = "codeR-mcp", version = "0.1.0")
+      serverInfo = list(name = "llamar-mcp", version = "0.1.0")
     ),
 
     "notifications/initialized" = NULL,  # No response for notifications
@@ -618,7 +618,7 @@ process_request <- function(line, send_fn) {
 
 # Stdio transport (for Claude Desktop compatibility)
 run_stdio <- function() {
-  log_msg("codeR MCP server starting (stdio)...")
+  log_msg("llamar MCP server starting (stdio)...")
 
   send_fn <- function(json) {
     cat(json, "\n", sep = "", file = stdout())
@@ -637,9 +637,9 @@ run_stdio <- function() {
   log_msg("Server stopped")
 }
 
-# Socket transport (for llamaR/R clients)
+# Socket transport (for llamar/R clients)
 run_socket <- function(port) {
-  log_msg(sprintf("codeR MCP server starting (socket port %d)...", port))
+  log_msg(sprintf("llamar MCP server starting (socket port %d)...", port))
 
   # Create server socket
   server <- serverSocket(port)

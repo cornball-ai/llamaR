@@ -1,8 +1,8 @@
 #!/usr/bin/env r
 #
-# codeR - Claude Code inspired CLI agent in R
+# llamar - Claude Code inspired CLI agent in R
 #
-# Usage: codeR [options]
+# Usage: llamar [options]
 #   --provider   anthropic|openai|ollama (default: anthropic)
 #   --model      model name (default: provider-specific)
 #   --port       MCP server port (default: 7850)
@@ -14,7 +14,7 @@ if (file.exists(renviron)) readRenviron(renviron)
 
 suppressPackageStartupMessages({
   library(jsonlite)
-  library(llamaR)
+  library(llm.api)
 })
 
 # ============================================================================
@@ -24,8 +24,8 @@ suppressPackageStartupMessages({
 parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
 
-  # Find script directory (where codeR lives)
-  script_dir <- Sys.getenv("CODER_HOME", "~/codeR")
+  # Find script directory (where llamar lives)
+  script_dir <- Sys.getenv("LLAMAR_HOME", "~/llamaR")
   script_dir <- path.expand(script_dir)
 
   opts <- list(
@@ -49,9 +49,9 @@ parse_args <- function() {
       i <- i + 2
     } else if (arg == "--help" || arg == "-h") {
       cat("
-codeR - Claude Code inspired CLI agent
+llamar - Claude Code inspired CLI agent
 
-Usage: codeR [options]
+Usage: llamar [options]
 
 Options:
   --provider   LLM provider: anthropic, openai, ollama (default: anthropic)
@@ -60,7 +60,7 @@ Options:
   --help       Show this help
 
 Commands (in chat):
-  /quit, /exit   Exit codeR
+  /quit, /exit   Exit llamar
   /tools         List available tools
   /clear         Clear conversation history
   /model <name>  Switch model
@@ -134,7 +134,7 @@ color <- list(
 )
 
 print_banner <- function() {
-  cat(sprintf("\n%s\U0001F33D\U26BE codeR%s\n", color$cyan, color$reset))
+  cat(sprintf("\n%s\U0001F33D\U26BE llamar%s\n", color$cyan, color$reset))
   cat(sprintf("%sType /help for commands, /quit to exit%s\n\n", color$dim, color$reset))
 }
 
@@ -176,19 +176,19 @@ run_agent <- function(opts) {
 
   if (!file.exists(opts$server_script)) {
     cat(sprintf("%sServer script not found: %s%s\n", color$yellow, opts$server_script, color$reset))
-    cat(sprintf("Set CODER_HOME or run from ~/codeR directory\n"))
+    cat(sprintf("Set LLAMAR_HOME or run from ~/llamar directory\n"))
     return(invisible(NULL))
   }
 
   if (!start_server(opts$server_script, opts$port)) {
     cat(sprintf("%sError: Could not start MCP server%s\n", color$yellow, color$reset))
-    cat("Make sure mcp_server.R is in the current directory or codeR directory\n")
+    cat("Make sure mcp_server.R is in the current directory or llamar directory\n")
     return(invisible(NULL))
   }
 
   # Connect
   conn <- tryCatch(
-    mcp_connect(port = opts$port, name = "codeR"),
+    mcp_connect(port = opts$port, name = "llamar"),
     error = function(e) {
       cat(sprintf("%sError connecting to server: %s%s\n", color$yellow, e$message, color$reset))
       NULL
@@ -281,7 +281,7 @@ run_agent <- function(opts) {
       } else if (cmd == "/help") {
         cat("
 Commands:
-  /quit, /exit   Exit codeR
+  /quit, /exit   Exit llamar
   /tools         List available tools
   /clear         Clear conversation history
   /model <name>  Switch model
@@ -298,7 +298,7 @@ Commands:
 
     # Send to LLM with tools
     # Debug: check config before call
-    .config <- llamaR:::.get_provider_config(provider)
+    .config <- llm.api:::.get_provider_config(provider)
     if (nchar(.config$api_key) == 0) {
       cat(sprintf("%sWarning: No API key found for %s%s\n", color$yellow, provider, color$reset))
       cat("Set ANTHROPIC_API_KEY in ~/.Renviron\n")
