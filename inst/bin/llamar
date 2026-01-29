@@ -15,6 +15,7 @@ if (file.exists(renviron)) readRenviron(renviron)
 suppressPackageStartupMessages({
   library(jsonlite)
   library(llm.api)
+  library(llamaR)
 })
 
 # ============================================================================
@@ -24,15 +25,10 @@ suppressPackageStartupMessages({
 parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
 
-  # Find script directory (where llamar lives)
-  script_dir <- Sys.getenv("LLAMAR_HOME", "~/llamaR")
-  script_dir <- path.expand(script_dir)
-
   opts <- list(
     provider = "anthropic",
     model = NULL,
-    port = 7850L,
-    server_script = file.path(script_dir, "mcp_server.R")
+    port = 7850L
   )
 
   i <- 1
@@ -80,7 +76,7 @@ Commands (in chat):
 # Server management
 # ============================================================================
 
-start_server <- function(script, port) {
+start_server <- function(port) {
   # Check if already running
   conn <- tryCatch(
     socketConnection("localhost", port, open = "r+b", blocking = TRUE, timeout = 1),
@@ -92,13 +88,14 @@ start_server <- function(script, port) {
     return(TRUE)  # Already running
   }
 
-  # Start server (use Rscript for arg passing)
-  # Pass current working directory so server operates there
+  # Start server using llamaR::serve()
   cwd <- getwd()
+  cmd <- sprintf('llamaR::serve(port = %d, cwd = "%s")', port, cwd)
+
   if (.Platform$OS.type == "windows") {
-    system2("Rscript", c(script, port, cwd), wait = FALSE, stdout = FALSE, stderr = FALSE)
+    system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE, stdout = FALSE, stderr = FALSE)
   } else {
-    system2("Rscript", c(script, port, cwd), wait = FALSE,
+    system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE,
             stdout = "/dev/null", stderr = "/dev/null")
   }
 
@@ -134,7 +131,7 @@ color <- list(
 )
 
 print_banner <- function() {
-  cat(sprintf("\n%s\U0001F33D\U26BE llamar%s\n", color$cyan, color$reset))
+  cat(sprintf("\n%s llamar%s\n", color$cyan, color$reset))
   cat(sprintf("%sType /help for commands, /quit to exit%s\n\n", color$dim, color$reset))
 }
 
@@ -168,21 +165,17 @@ print_response <- function(text) {
 # Main agent loop
 # ============================================================================
 
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
 run_agent <- function(opts) {
   print_banner()
 
   # Start/connect to MCP server
   cat(sprintf("%sStarting MCP server on port %d...%s\n", color$dim, opts$port, color$reset))
 
-  if (!file.exists(opts$server_script)) {
-    cat(sprintf("%sServer script not found: %s%s\n", color$yellow, opts$server_script, color$reset))
-    cat(sprintf("Set LLAMAR_HOME or run from ~/llamar directory\n"))
-    return(invisible(NULL))
-  }
-
-  if (!start_server(opts$server_script, opts$port)) {
+  if (!start_server(opts$port)) {
     cat(sprintf("%sError: Could not start MCP server%s\n", color$yellow, color$reset))
-    cat("Make sure mcp_server.R is in the current directory or llamar directory\n")
+    cat("Make sure llamaR package is installed.\n")
     return(invisible(NULL))
   }
 
@@ -332,8 +325,6 @@ Commands:
 # ============================================================================
 # Entry point
 # ============================================================================
-
-`%||%` <- function(x, y) if (is.null(x)) y else x
 
 if (!interactive()) {
   opts <- parse_args()

@@ -1,0 +1,10 @@
+^\.Rproj\.user$
+^.*\.Rproj$
+^\.git$
+^\.github$
+^CLAUDE\.md$
+^README\.md$
+^claude_desktop_config\.json$
+^llamar$
+^llamar\.R$
+^mcp_server\.R$

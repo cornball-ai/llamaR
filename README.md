@@ -1,154 +1,248 @@
 # llamaR
 
-An open-source interactive CLI agent
+**llamaR is a CLI-first AI agent runtime for R built on the Model Context Protocol (MCP).**
+It connects to LLMs (Anthropic, OpenAI, Ollama) and gives them direct access to a live R session with real tools.
 
-## What is this?
+The `llamar` CLI is the human-facing agent.
+The `llamaR` package is the R engine and MCP server.
 
-A minimal example showing how to build an interactive CLI agent in R using:
+---
 
-- `readline()` for user input
-- `menu()` for interactive choices
-- Simple intent parsing with regex
-- Tool dispatch with `switch()`
+In Spanish, *llamar* (pronounced ["Ya Mar"](https://www.youtube.com/watch?v=p-2EZXOoFt8)) means “to call,” reflecting that the tool calls out to language models and MCP tools.
 
-## Usage
+---
 
-```bash
-# With littler
-r llamar.R
+## What is llamaR?
 
-# Or with Rscript
-Rscript llamar.R
-```
+llamaR provides two things:
 
-## Commands
+1. **`llamar` (CLI agent)**
+   An interactive terminal agent that connects to LLMs and uses MCP tools to act.
 
-| Command | Description |
-|---------|-------------|
-| `read <file>` | Display file contents |
-| `find <pattern>` | Find files matching glob |
-| `search <pattern>` | Search file contents |
-| `run <command>` | Execute shell command |
-| `write <file>` | Write content to file |
-| `help` | Show help |
-| `quit` | Exit |
+2. **MCP server (R)**
+   A standalone MCP server exposing R-native tools: file operations, git, R execution, documentation lookup, and data inspection.
 
-## Example Session
+It can run:
 
-```
-> read README.md
-[Reading: README.md]
-   1 | # llamar
-   2 |
-   3 | An open-source interactive CLI agent...
+* as a tool provider for Claude Desktop or other MCP clients
+* as a CLI agent for humans
+* as an MCP client connecting to other MCP servers
 
-> find *.R
-[Glob: *.R in .]
-- ./llamar.R
-( 1 files)
+---
 
-> search function
-[Grep: function in .]
-./llamar.R:
-    12:   tool_read <- function(path) {
-    32:   tool_glob <- function(pattern, path = ".") {
-    45:   tool_grep <- function(pattern, path = ".") {
-```
+## Why llamaR?
+
+llamaR draws inspiration from several projects:
+
+- [btw](https://posit-dev.github.io/btw/) — directly inspired `fyi`
+- [moltbot](https://github.com/moltbot/moltbot) — the CLI-first, multi-channel personal agent pattern
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — terminal-native AI workflows
+
+llamaR and the mcptools ecosystems have parallel structure:
+
+| Role              | Posit (tidyverse)                        | cornyverse                |
+| ----------------- | ---------------------------------------- | ------------------------- |
+| LLM API client    | [ellmer](https://ellmer.tidyverse.org/)  | llm.api                   |
+| Context tools     | [btw](https://posit-dev.github.io/btw/)  | fyi                       |
+| MCP bridge        | mcptools                                 | llamaR                    |
+
+**Different philosophies:**
+
+mcptools integrates R into the broader MCP ecosystem—Claude Desktop, VS Code Copilot, Positron, shiny apps via ellmer. It's polished, on CRAN, and backed by Posit.
+ 
+llamaR is a standalone agent runtime. It ships its own CLI, handles LLM connections internally, and doesn't require external clients. It follows tinyverse principles: minimal dependencies, base R idioms, no heavy frameworks.
+
+| If you want to...                              | Consider     |
+| ---------------------------------------------- | ------------ |
+| Use R from Claude Desktop / VS Code / Positron | mcptools     |
+| Build shiny apps with MCP tools                | mcptools     |
+| Run an AI agent from your terminal             | llamaR       |
+| Stay in the tinyverse                          | llamaR       |
+| Avoid external client dependencies             | llamaR       |
+
+AI and CLI coding agents enable bespoke software, this is our take.
+
+---
+
+## R-Specific Superpowers
+
+llamaR exposes real R tools to LLMs (not just `Rscript` shell calls):
+
+| Tool                 | Description                                       |
+| -------------------- | ------------------------------------------------- |
+| `run_r`              | Execute arbitrary R code and return results       |
+| `r_help`             | Query R documentation for any function or package |
+| `installed_packages` | List and search installed R packages              |
+| `read_csv`           | Read CSV and return summary statistics            |
+| `chat`               | Call LLMs via `llm.api`                           |
+| file ops             | Read/write/list files                             |
+| git ops              | Repo inspection and commands                      |
+
+This allows:
+
+* stateful data analysis
+* inspection of R environments
+* iterative computation
+* agent-driven exploration
+
+---
 
 ## Architecture
 
-```
-User Input
-    │
-    ▼
-parse_intent()  ──▶  keyword matching
-    │
-    ▼
-run_tool()  ──▶  switch() dispatch
-    │
-    ├──▶ tool_read()
-    ├──▶ tool_glob()
-    ├──▶ tool_grep()
-    ├──▶ tool_bash()
-    └──▶ tool_write()
-```
+llamaR supports three roles:
 
-## MCP Server
+### 1. As an MCP Server (for other agents)
 
-`mcp_server.R` is a minimal MCP (Model Context Protocol) server using stdio transport.
-
-**Only dependency:** `jsonlite`
-
-### How it works
-
-```
-Claude Desktop/Client
-        │
-        │ stdin: JSON-RPC request
-        ▼
-   ┌─────────────┐
-   │ mcp_server.R │  ◄── reads line from stdin()
-   └─────────────┘      parses JSON, handles method
-        │               writes response to stdout()
-        │ stdout: JSON-RPC response
-        ▼
-Claude Desktop/Client
-```
-
-### Tools provided
-
-| Tool | Description |
-|------|-------------|
-| `read_file` | Read file contents |
-| `list_files` | List directory with optional glob |
-| `run_r` | Execute R code |
-
-### Claude Desktop config
-
-Add to `~/.config/claude-desktop/claude_desktop_config.json`:
+Example Claude Desktop config:
 
 ```json
 {
   "mcpServers": {
-    "llamar": {
+    "llamaR": {
       "command": "r",
-      "args": ["/path/to/mcp_server.R"]
+      "args": ["-e", "llamaR::serve()"]
     }
   }
 }
 ```
 
-### Test manually
+Now Claude can:
+
+* run R code
+* inspect packages
+* analyze data
+* use R as a reasoning engine
+
+---
+
+### 2. As an MCP Client (connecting to other servers)
+
+```r
+r_tools   <- mcp_connect(port = 7850)
+web_tools <- mcp_connect(port = 7851)
+db_tools  <- mcp_connect(port = 7852)
+
+all_tools <- c(
+  mcp_tools_for_api(r_tools),
+  mcp_tools_for_api(web_tools),
+  mcp_tools_for_api(db_tools)
+)
+```
+
+This allows chaining:
+
+* R tools
+* filesystem tools
+* database tools
+* APIs
+* other agents
+
+---
+
+### 3. As a CLI Agent (for humans)
 
 ```bash
-# Start server
-r mcp_server.R
-
-# Paste JSON-RPC (server reads from stdin):
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_files","arguments":{"path":"."}}}
+llamar
 ```
 
-### MCP Protocol basics
+Interactive prompt:
 
-MCP uses JSON-RPC 2.0. Key methods:
-
-| Method | Purpose |
-|--------|---------|
-| `initialize` | Handshake, return capabilities |
-| `tools/list` | Return available tools |
-| `tools/call` | Execute a tool |
-
-Request format:
-```json
-{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "README.md"}}}
+```
+> load this CSV and summarize it
+> explain this error
+> refactor this function
+> install missing packages and retry
 ```
 
-Response format:
-```json
-{"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "file contents..."}]}}
+---
+
+## Installation
+
+Planned as an R package with optional CLI:
+
+```r
+install.packages("llamaR")
+llamaR::install_cli()
 ```
+
+Then:
+
+```bash
+llamar
+```
+
+Or from R:
+
+```r
+llamaR::run()
+```
+
+---
+
+## Platform Support
+
+| Platform | Status                           |
+| -------- | -------------------------------- |
+| Linux    | Fully supported                  |
+| macOS    | Expected to work                 |
+| Windows  | Partial (stdin handling pending) |
+
+The MCP server is pure R and works everywhere.
+
+---
+
+## Design Philosophy
+
+* CLI-first, not IDE-first
+* tinyverse: minimal dependencies
+* model-agnostic
+* MCP-native
+* composable
+* scriptable
+* inspectable
+* stateful
+* hackable
+
+No Shiny. No RStudio dependency. No heavy frameworks.
+
+---
+
+## Roadmap
+
+* Proper package structure (DESCRIPTION, NAMESPACE)
+* Cross-platform input backend (pure R readline)
+* Session management (history + context)
+* Streaming responses
+* Improved error handling
+* `tinytest` suite
+* CI
+* Documentation and examples
+
+---
+
+## When should you use llamaR?
+
+Use llamaR if you want:
+
+* an AI agent that can *actually run R*
+* a CLI interface for R + LLM workflows
+* an MCP server exposing R tools
+* a hub that connects multiple MCP servers
+* something closer to Claude Code, but R-native
+
+Use `mcptools` if you only want:
+
+* to expose one or two R functions as MCP endpoints
+
+---
+
+## Status
+
+Experimental.
+Interfaces may change.
+Designed for research and agent workflows.
+
+---
 
 ## License
 

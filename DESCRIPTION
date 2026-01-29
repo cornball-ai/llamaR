@@ -1,0 +1,19 @@
+Package: llamaR
+Title: CLI-First AI Agent Runtime for R Built on MCP
+Version: 0.1.0
+Authors@R: person("Troy", "Hernandez", role = c("aut", "cre"),
+                  email = "troy@cornball.ai")
+Description: An interactive CLI agent that connects to LLMs (Anthropic, OpenAI,
+    Ollama) and gives them direct access to a live R session via the Model
+    Context Protocol (MCP). Provides both an MCP server exposing R-native tools
+    and a CLI agent for terminal-based AI workflows.
+License: MIT + file LICENSE
+URL: https://github.com/cornball-ai/llamaR
+BugReports: https://github.com/cornball-ai/llamaR/issues
+Imports:
+    jsonlite
+Suggests:
+    llm.api,
+    tinytest
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)

@@ -1,0 +1,5 @@
+# tinyrox says don't edit this manually, but it can't stop you!
+
+export(install_cli)
+export(serve)
+export(uninstall_cli)
