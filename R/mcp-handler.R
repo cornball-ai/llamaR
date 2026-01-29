@@ -14,7 +14,7 @@ handle_request <- function(req) {
     "initialize" = list(
       protocolVersion = "2024-11-05",
       capabilities = list(tools = list()),
-      serverInfo = list(name = "llamar-mcp", version = packageVersion("llamaR"))
+      serverInfo = list(name = "llamar-mcp", version = as.character(packageVersion("llamaR")))
     ),
 
     "notifications/initialized" = NULL,  # No response for notifications

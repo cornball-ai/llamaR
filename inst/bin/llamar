@@ -174,24 +174,31 @@ print_banner <- function(session_id = NULL) {
 }
 
 print_tool <- function(name, args) {
-  cat(sprintf("\n%s[%s]%s", color$yellow, name, color$reset))
+  # Function-style: tool_name("arg1", "arg2")
   if (length(args) > 0) {
-    args_str <- paste(names(args), sapply(args, function(x) {
-      if (is.character(x) && nchar(x) > 50) paste0(substr(x, 1, 47), "...")
-      else as.character(x)
-    }), sep = "=", collapse = ", ")
-    cat(sprintf(" %s%s%s", color$dim, args_str, color$reset))
+    args_str <- paste(sapply(args, function(x) {
+      if (is.character(x)) {
+        s <- if (nchar(x) > 40) paste0(substr(x, 1, 37), "...") else x
+        sprintf('"%s"', s)
+      } else {
+        as.character(x)
+      }
+    }), collapse = ", ")
+    cat(sprintf("%s%s(%s)%s\n", color$dim, name, args_str, color$reset))
+  } else {
+    cat(sprintf("%s%s()%s\n", color$dim, name, color$reset))
   }
-  cat("\n")
 }
 
-print_result <- function(text, max_lines = 20) {
+print_result <- function(text, max_lines = 3) {
+  # Brief preview - model will summarize the full result
   lines <- strsplit(text, "\n")[[1]]
   if (length(lines) > max_lines) {
+    cat(sprintf("%s", color$dim))
     cat(paste(lines[1:max_lines], collapse = "\n"))
-    cat(sprintf("\n%s... (%d more lines)%s\n", color$dim, length(lines) - max_lines, color$reset))
-  } else {
-    cat(text, "\n")
+    cat(sprintf("\n... (%d more lines)%s\n", length(lines) - max_lines, color$reset))
+  } else if (nchar(text) > 0) {
+    cat(sprintf("%s%s%s\n", color$dim, text, color$reset))
   }
 }
 
@@ -408,12 +415,20 @@ Commands:
     llamaR:::session_save(session)
 
     # Send to LLM with tools
-    # Debug: check config before call
-    .config <- llm.api:::.get_provider_config(provider)
-    if (nchar(.config$api_key) == 0) {
-      cat(sprintf("%sWarning: No API key found for %s%s\n", color$yellow, provider, color$reset))
-      cat("Set ANTHROPIC_API_KEY in ~/.Renviron\n")
-      next
+    # Check API key (not needed for Ollama)
+    if (provider != "ollama") {
+      .config <- llm.api:::.get_provider_config(provider)
+      api_key <- .config$api_key %||% ""
+      if (nchar(api_key) == 0) {
+        cat(sprintf("%sWarning: No API key found for %s%s\n", color$yellow, provider, color$reset))
+        env_var <- switch(provider,
+          anthropic = "ANTHROPIC_API_KEY",
+          openai = "OPENAI_API_KEY",
+          paste0(toupper(provider), "_API_KEY")
+        )
+        cat(sprintf("Set %s in ~/.Renviron\n", env_var))
+        next
+      }
     }
 
     result <- tryCatch({
