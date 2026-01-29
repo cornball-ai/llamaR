@@ -240,12 +240,14 @@ run_agent <- function(opts) {
     # Read input
     prompt <- readLines(stdin(), n = 1, warn = FALSE)
 
+    # DEBUG
+    cat(sprintf("[DEBUG read: len=%d, val='%s']\n", length(prompt), prompt[1]))
+
     # Handle EOF (Ctrl+D)
     if (length(prompt) == 0) {
       cat("\n")
       break
     }
-
 
     prompt <- trimws(prompt)
     if (nchar(prompt) == 0) next
