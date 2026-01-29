@@ -8,17 +8,14 @@
 #   --port       MCP server port (default: 7850)
 #
 
+# Load .Renviron explicitly (littler may not load it automatically)
+renviron <- path.expand("~/.Renviron")
+if (file.exists(renviron)) readRenviron(renviron)
+
 suppressPackageStartupMessages({
   library(jsonlite)
   library(llamaR)
 })
-
-# Debug: check API key
-if (FALSE) {  # Set to TRUE to debug
-  config <- llamaR:::.get_provider_config("anthropic")
-  cat("DEBUG - API key available:", nchar(config$api_key) > 0, "\n")
-  cat("DEBUG - API key prefix:", substr(config$api_key, 1, 15), "\n")
-}
 
 # ============================================================================
 # CLI argument parsing
@@ -135,13 +132,7 @@ color <- list(
 )
 
 print_banner <- function() {
-  cat(sprintf("%s
-   ___  ___  ___| |___
-  / __|/ _ \\/ _ \\  _/ -_)
-  \\___\\___/\\___/\\__\\___|  R
-%s
-", color$cyan, color$reset))
-  cat(sprintf("%sClaude Code inspired CLI agent%s\n", color$dim, color$reset))
+  cat(sprintf("\n%s\U0001F33D codeR%s\n", color$cyan, color$reset))
   cat(sprintf("%sType /help for commands, /quit to exit%s\n\n", color$dim, color$reset))
 }
 
