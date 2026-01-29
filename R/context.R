@@ -10,13 +10,11 @@
 #' @return Character string with assembled context, or NULL if no files found
 #' @noRd
 load_context <- function(cwd = getwd()) {
-  # Files to look for (in order)
-  context_files <- c(
-    file.path(cwd, "fyi.md"),            # Package/project introspection
-    file.path(cwd, "LLAMAR.md"),         # Project instructions
-    file.path(cwd, ".llamar", "LLAMAR.md"), # Alt location for instructions
-    file.path(cwd, "AGENTS.md")          # Moltbot-style agent instructions
-  )
+  # Get file list from config (or defaults)
+  file_names <- get_context_files(cwd)
+
+  # Build full paths
+  context_files <- file.path(cwd, file_names)
 
   # Read existing files
   contents <- list()
@@ -59,12 +57,12 @@ load_context <- function(cwd = getwd()) {
 #' @return Character vector of existing context file paths
 #' @noRd
 list_context_files <- function(cwd = getwd()) {
-  context_files <- c(
-    file.path(cwd, "fyi.md"),
-    file.path(cwd, "LLAMAR.md"),
-    file.path(cwd, ".llamar", "LLAMAR.md"),
-    file.path(cwd, "AGENTS.md")
-  )
+  # Get file list from config (or defaults)
+  file_names <- get_context_files(cwd)
 
+  # Build full paths
+  context_files <- file.path(cwd, file_names)
+
+  # Return only existing files
   context_files[file.exists(context_files)]
 }

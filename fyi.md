@@ -17,11 +17,15 @@
 | Function | Arguments |
 |----------|-----------|
 | `call_tool` | name, args |
+| `default_context_files` |  |
 | `err` | text |
 | `format_session_list` | sessions |
+| `get_context_files` | cwd |
 | `get_tools` |  |
 | `handle_request` | req |
 | `list_context_files` | cwd |
+| `load_config` | cwd |
+| `load_config_file` | path |
 | `load_context` | cwd |
 | `log_msg` | ... |
 | `ok` | text |

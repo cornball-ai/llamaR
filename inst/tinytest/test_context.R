@@ -14,52 +14,64 @@ expect_equal(length(files), 0)
 ctx <- llamaR:::load_context(testdir)
 expect_null(ctx)
 
-# Create fyi.md
-writeLines(c("# fyi: mypackage", "", "This is package info."), file.path(testdir, "fyi.md"))
+# Create README.md (now in defaults)
+writeLines(c("# My Project", "", "This is the readme."), file.path(testdir, "README.md"))
 
-# Test list_context_files finds fyi.md
+# Test list_context_files finds README.md
 files <- llamaR:::list_context_files(testdir)
 expect_equal(length(files), 1)
-expect_true(grepl("fyi.md", files[1]))
+expect_true(grepl("README.md", files[1]))
 
-# Test load_context includes fyi.md content
+# Test load_context includes README.md content
 ctx <- llamaR:::load_context(testdir)
-expect_true(grepl("fyi.md", ctx))
-expect_true(grepl("mypackage", ctx))
-expect_true(grepl("package info", ctx))
+expect_true(grepl("README.md", ctx))
+expect_true(grepl("My Project", ctx))
 
-# Create LLAMAR.md
-writeLines(c("# Project Instructions", "", "Do this, not that."), file.path(testdir, "LLAMAR.md"))
+# Create PLAN.md
+writeLines(c("# Development Plan", "", "Phase 1: Core"), file.path(testdir, "PLAN.md"))
 
 # Test both files are found
 files <- llamaR:::list_context_files(testdir)
 expect_equal(length(files), 2)
 
-# Test both are included in context
-ctx <- llamaR:::load_context(testdir)
-expect_true(grepl("fyi.md", ctx))
-expect_true(grepl("LLAMAR.md", ctx))
-expect_true(grepl("Project Instructions", ctx))
-
-# Create .llamar/LLAMAR.md (should be found too)
-dir.create(file.path(testdir, ".llamar"), showWarnings = FALSE)
-writeLines("# Alt Instructions", file.path(testdir, ".llamar", "LLAMAR.md"))
+# Create fyi.md
+writeLines(c("# fyi: mypackage", "", "This is package info."), file.path(testdir, "fyi.md"))
 
 files <- llamaR:::list_context_files(testdir)
 expect_equal(length(files), 3)
+
+# Create LLAMAR.md
+writeLines(c("# Project Instructions", "", "Do this, not that."), file.path(testdir, "LLAMAR.md"))
+
+files <- llamaR:::list_context_files(testdir)
+expect_equal(length(files), 4)
 
 # Create AGENTS.md
 writeLines("# Agent Guidelines", file.path(testdir, "AGENTS.md"))
 
 files <- llamaR:::list_context_files(testdir)
-expect_equal(length(files), 4)
+expect_equal(length(files), 5)
 
+# Test all are included in context
 ctx <- llamaR:::load_context(testdir)
+expect_true(grepl("README.md", ctx))
+expect_true(grepl("PLAN.md", ctx))
+expect_true(grepl("fyi.md", ctx))
+expect_true(grepl("LLAMAR.md", ctx))
+expect_true(grepl("AGENTS.md", ctx))
 expect_true(grepl("Agent Guidelines", ctx))
 
 # Test system prompt structure
 expect_true(grepl("You are an AI assistant", ctx))
 expect_true(grepl("context about the current project", ctx))
+
+# Test custom config overrides default file list
+dir.create(file.path(testdir, ".llamar"), showWarnings = FALSE)
+writeLines('{"context_files": ["README.md"]}', file.path(testdir, ".llamar", "config.json"))
+
+files <- llamaR:::list_context_files(testdir)
+expect_equal(length(files), 1)
+expect_true(grepl("README.md", files[1]))
 
 # Cleanup
 unlink(testdir, recursive = TRUE)
