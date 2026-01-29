@@ -132,7 +132,7 @@ color <- list(
 )
 
 print_banner <- function() {
-  cat(sprintf("\n%s\U0001F33D codeR%s\n", color$cyan, color$reset))
+  cat(sprintf("\n%s\U0001F33D\U26BE codeR%s\n", color$cyan, color$reset))
   cat(sprintf("%sType /help for commands, /quit to exit%s\n\n", color$dim, color$reset))
 }
 
