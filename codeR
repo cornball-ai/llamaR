@@ -20,11 +20,15 @@ suppressPackageStartupMessages({
 parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
 
+  # Find script directory (where codeR lives)
+  script_dir <- Sys.getenv("CODER_HOME", "~/codeR")
+  script_dir <- path.expand(script_dir)
+
   opts <- list(
     provider = "anthropic",
     model = NULL,
     port = 7850L,
-    server_script = file.path(dirname(sys.frame(1)$ofile %||% "."), "mcp_server.R")
+    server_script = file.path(script_dir, "mcp_server.R")
   )
 
   i <- 1
@@ -171,8 +175,9 @@ run_agent <- function(opts) {
   cat(sprintf("%sStarting MCP server on port %d...%s\n", color$dim, opts$port, color$reset))
 
   if (!file.exists(opts$server_script)) {
-    # Try current directory
-    opts$server_script <- "mcp_server.R"
+    cat(sprintf("%sServer script not found: %s%s\n", color$yellow, opts$server_script, color$reset))
+    cat(sprintf("Set CODER_HOME or run from ~/codeR directory\n"))
+    return(invisible(NULL))
   }
 
   if (!start_server(opts$server_script, opts$port)) {
