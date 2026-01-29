@@ -233,12 +233,11 @@ run_agent <- function(opts) {
 
   # REPL
   while (TRUE) {
-    # Prompt
-    cat(sprintf("%s>%s ", color$green, color$reset))
-    flush(stdout())
-
-    # Read input (invisible to suppress echo)
-    prompt <- invisible(readLines(stdin(), n = 1, warn = FALSE))
+    # Prompt and read input via bash (avoids R's stdin echo)
+    prompt <- system(
+      sprintf('read -p "%s>%s " line && echo "$line"', color$green, color$reset),
+      intern = TRUE
+    )
 
     # Handle EOF (Ctrl+D)
     if (length(prompt) == 0) {
