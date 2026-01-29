@@ -204,9 +204,17 @@ run_agent <- function(opts) {
   # Tool handler
   tool_handler <- function(name, args) {
     print_tool(name, args)
-    result <- mcp_call(conn, name, args)
-    print_result(result$text %||% "")
-    result$text %||% ""
+    result <- tryCatch({
+      mcp_call(conn, name, args)
+    }, error = function(e) {
+      cat(sprintf("%sTool error: %s%s\n", color$yellow, e$message, color$reset))
+      list(text = paste("Error:", e$message))
+    })
+    text <- result$text %||% ""
+    if (nchar(text) > 0) {
+      print_result(text)
+    }
+    text
   }
 
   # Conversation state

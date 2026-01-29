@@ -223,7 +223,7 @@ err <- function(text) {
 # File operations ----
 
 tool_read_file <- function(args) {
-  path <- args$path
+  path <- path.expand(args$path)
   if (!file.exists(path)) return(err(paste("File not found:", path)))
 
   lines <- readLines(path, warn = FALSE)
@@ -234,7 +234,7 @@ tool_read_file <- function(args) {
 }
 
 tool_write_file <- function(args) {
-  path <- args$path
+  path <- path.expand(args$path)
   content <- args$content
 
   tryCatch({
@@ -246,7 +246,7 @@ tool_write_file <- function(args) {
 }
 
 tool_list_files <- function(args) {
-  path <- args$path %||% "."
+  path <- path.expand(args$path %||% ".")
   pattern <- args$pattern
   recursive <- isTRUE(args$recursive)
 
@@ -268,7 +268,7 @@ tool_list_files <- function(args) {
 
 tool_grep_files <- function(args) {
   pattern <- args$pattern
-  path <- args$path %||% "."
+  path <- path.expand(args$path %||% ".")
   file_pattern <- args$file_pattern %||% "*.R"
 
   files <- Sys.glob(file.path(path, file_pattern))
@@ -360,7 +360,7 @@ tool_installed_packages <- function(args) {
 # Data ----
 
 tool_read_csv <- function(args) {
-  path <- args$path
+  path <- path.expand(args$path)
   n_head <- args$head %||% 10
   show_summary <- args$summary %||% TRUE
 
@@ -409,7 +409,7 @@ tool_fetch_url <- function(args) {
 # Git ----
 
 tool_git_status <- function(args) {
-  path <- args$path %||% "."
+  path <- path.expand(args$path %||% ".")
   cmd <- sprintf("git -C %s status --short", shQuote(path))
   result <- tryCatch(
     system(cmd, intern = TRUE),
@@ -420,7 +420,7 @@ tool_git_status <- function(args) {
 }
 
 tool_git_diff <- function(args) {
-  path <- args$path %||% "."
+  path <- path.expand(args$path %||% ".")
   staged <- if (isTRUE(args$staged)) "--staged" else ""
   cmd <- sprintf("git -C %s diff %s", shQuote(path), staged)
   result <- tryCatch(
@@ -432,7 +432,7 @@ tool_git_diff <- function(args) {
 }
 
 tool_git_log <- function(args) {
-  path <- args$path %||% "."
+  path <- path.expand(args$path %||% ".")
   n <- args$n %||% 10
   cmd <- sprintf("git -C %s log --oneline -n %d", shQuote(path), n)
   result <- tryCatch(
