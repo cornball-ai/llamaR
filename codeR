@@ -237,11 +237,8 @@ run_agent <- function(opts) {
     cat(sprintf("%s>%s ", color$green, color$reset))
     flush(stdout())
 
-    # Read input
-    prompt <- readLines(stdin(), n = 1, warn = FALSE)
-
-    # DEBUG
-    cat(sprintf("[DEBUG read: len=%d, val='%s']\n", length(prompt), prompt[1]))
+    # Read input (invisible to suppress echo)
+    prompt <- invisible(readLines(stdin(), n = 1, warn = FALSE))
 
     # Handle EOF (Ctrl+D)
     if (length(prompt) == 0) {
