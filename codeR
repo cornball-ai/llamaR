@@ -233,8 +233,9 @@ run_agent <- function(opts) {
 
   # REPL
   while (TRUE) {
-    # Prompt - use writeLines to avoid buffering issues
-    writeLines(sprintf("%s>%s ", color$green, color$reset), sep = "")
+    # Prompt
+    cat(sprintf("%s>%s ", color$green, color$reset))
+    flush(stdout())
 
     # Read input
     prompt <- readLines(stdin(), n = 1, warn = FALSE)
@@ -244,6 +245,10 @@ run_agent <- function(opts) {
       cat("\n")
       break
     }
+
+    # Move cursor up and clear line to hide echo, then reprint prompt + input
+    cat("\033[A\033[2K")  # Move up, clear line
+    cat(sprintf("%s>%s %s\n", color$green, color$reset, prompt))
 
     prompt <- trimws(prompt)
     if (nchar(prompt) == 0) next
