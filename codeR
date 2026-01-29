@@ -228,13 +228,14 @@ run_agent <- function(opts) {
   # REPL
   while (TRUE) {
     # Prompt
+    cat(sprintf("%s>%s ", color$green, color$reset))
     prompt <- tryCatch(
-      readline(sprintf("%s>%s ", color$green, color$reset)),
-      error = function(e) NULL
+      readLines(con = stdin(), n = 1, warn = FALSE),
+      error = function(e) character(0)
     )
 
     # Handle EOF (Ctrl+D)
-    if (is.null(prompt)) {
+    if (length(prompt) == 0) {
       cat("\n")
       break
     }
