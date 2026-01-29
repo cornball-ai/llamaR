@@ -25,7 +25,7 @@ TOOLS <- list(
         path = list(type = "string", description = "File path to read"),
         lines = list(type = "integer", description = "Max lines to read (default: all)")
       ),
-      required = "path"
+      required = list("path")
     )
   ),
   list(
@@ -37,7 +37,7 @@ TOOLS <- list(
         path = list(type = "string", description = "File path to write"),
         content = list(type = "string", description = "Content to write")
       ),
-      required = c("path", "content")
+      required = list("path", "content")
     )
   ),
   list(
@@ -50,7 +50,7 @@ TOOLS <- list(
         pattern = list(type = "string", description = "Glob pattern (optional)"),
         recursive = list(type = "boolean", description = "Search recursively (default: false)")
       ),
-      required = "path"
+      required = list("path")
     )
   ),
   list(
@@ -63,7 +63,7 @@ TOOLS <- list(
         path = list(type = "string", description = "Directory to search (default: .)"),
         file_pattern = list(type = "string", description = "File glob pattern (default: *.R)")
       ),
-      required = "pattern"
+      required = list("pattern")
     )
   ),
 
@@ -76,7 +76,7 @@ TOOLS <- list(
       properties = list(
         code = list(type = "string", description = "R code to execute")
       ),
-      required = "code"
+      required = list("code")
     )
   ),
   list(
@@ -88,7 +88,7 @@ TOOLS <- list(
         command = list(type = "string", description = "Shell command to execute"),
         timeout = list(type = "integer", description = "Timeout in seconds (default: 30)")
       ),
-      required = "command"
+      required = list("command")
     )
   ),
 
@@ -102,7 +102,7 @@ TOOLS <- list(
         topic = list(type = "string", description = "Function or package name"),
         package = list(type = "string", description = "Package to search in (optional)")
       ),
-      required = "topic"
+      required = list("topic")
     )
   ),
   list(
@@ -127,7 +127,7 @@ TOOLS <- list(
         head = list(type = "integer", description = "Number of rows to show (default: 10)"),
         summary = list(type = "boolean", description = "Include summary statistics (default: true)")
       ),
-      required = "path"
+      required = list("path")
     )
   ),
 
@@ -141,7 +141,7 @@ TOOLS <- list(
         url = list(type = "string", description = "URL to fetch"),
         method = list(type = "string", description = "HTTP method (default: GET)")
       ),
-      required = "url"
+      required = list("url")
     )
   ),
 
@@ -192,7 +192,7 @@ TOOLS <- list(
         system = list(type = "string", description = "System prompt (optional)"),
         temperature = list(type = "number", description = "Temperature 0-1 (default: 0.7)")
       ),
-      required = "prompt"
+      required = list("prompt")
     )
   ),
   list(
