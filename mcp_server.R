@@ -1,10 +1,14 @@
 #!/usr/bin/env r
 #
 # Minimal MCP server using stdio transport
-# Only dependency: jsonlite
+# Dependencies: jsonlite, llamaR (optional, for chat)
 #
 
 library(jsonlite)
+
+# Load llamaR if available
+HAS_LLAMAR <- requireNamespace("llamaR", quietly = TRUE)
+if (HAS_LLAMAR) library(llamaR)
 
 # ============================================================================
 # Tool definitions
@@ -171,6 +175,33 @@ TOOLS <- list(
       properties = list(
         path = list(type = "string", description = "Repository path (default: .)"),
         n = list(type = "integer", description = "Number of commits (default: 10)")
+      )
+    )
+  ),
+
+  # Chat (requires llamaR)
+  list(
+    name = "chat",
+    description = "Chat with an LLM (requires llamaR). Supports ollama, claude, openai providers.",
+    inputSchema = list(
+      type = "object",
+      properties = list(
+        prompt = list(type = "string", description = "The message to send"),
+        provider = list(type = "string", description = "Provider: ollama, claude, openai (default: ollama)"),
+        model = list(type = "string", description = "Model name (default: provider-specific)"),
+        system = list(type = "string", description = "System prompt (optional)"),
+        temperature = list(type = "number", description = "Temperature 0-1 (default: 0.7)")
+      ),
+      required = "prompt"
+    )
+  ),
+  list(
+    name = "chat_models",
+    description = "List available models for chat",
+    inputSchema = list(
+      type = "object",
+      properties = list(
+        provider = list(type = "string", description = "Provider to list models for (default: ollama)")
       )
     )
   )
@@ -411,6 +442,67 @@ tool_git_log <- function(args) {
   ok(paste(result, collapse = "\n"))
 }
 
+# Chat (llamaR) ----
+
+tool_chat <- function(args) {
+  if (!HAS_LLAMAR) {
+    return(err("llamaR not installed. Install with: install.packages('llamaR')"))
+  }
+
+  prompt <- args$prompt
+  provider <- args$provider %||% "ollama"
+  model <- args$model
+  system_prompt <- args$system
+  temperature <- args$temperature %||% 0.7
+
+  tryCatch({
+    result <- llamaR::chat(
+      prompt = prompt,
+      provider = provider,
+      model = model,
+      system = system_prompt,
+      temperature = temperature,
+      stream = FALSE
+    )
+    ok(result)
+  }, error = function(e) {
+    err(paste("Chat error:", e$message))
+  })
+}
+
+tool_chat_models <- function(args) {
+  if (!HAS_LLAMAR) {
+    return(err("llamaR not installed"))
+  }
+
+  provider <- args$provider %||% "ollama"
+
+  tryCatch({
+    if (provider == "ollama") {
+      # Query ollama API for models
+      result <- tryCatch({
+        con <- url("http://localhost:11434/api/tags")
+        on.exit(close(con))
+        data <- fromJSON(paste(readLines(con, warn = FALSE), collapse = ""))
+        models <- data$models$name
+        if (length(models) == 0) "No models found"
+        else paste(models, collapse = "\n")
+      }, error = function(e) {
+        "Ollama not running or no models installed"
+      })
+      ok(result)
+    } else if (provider == "local") {
+      models <- llamaR::list_local_models()
+      if (length(models) == 0) ok("No local models found")
+      else ok(paste(basename(models), collapse = "\n"))
+    } else {
+      ok(paste("Model listing not supported for provider:", provider))
+    }
+  }, error = function(e) {
+    err(paste("Error listing models:", e$message))
+  })
+}
+
 # Dispatcher ----
 
 call_tool <- function(name, args) {
@@ -441,6 +533,10 @@ call_tool <- function(name, args) {
     "git_status" = tool_git_status(args),
     "git_diff" = tool_git_diff(args),
     "git_log" = tool_git_log(args),
+
+    # Chat
+    "chat" = tool_chat(args),
+    "chat_models" = tool_chat_models(args),
 
     # Unknown
     err(paste("Unknown tool:", name))
