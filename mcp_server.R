@@ -689,18 +689,22 @@ run_socket <- function(port) {
 
 if (!interactive()) {
   # Parse command line args
-  # Use positional arg or key=value format for littler compatibility
+  # Format: port [cwd]
   args <- commandArgs(trailingOnly = TRUE)
 
   port <- NULL
-  for (arg in args) {
-    # Handle port=7850 format
-    if (grepl("^port=", arg)) {
-      port <- as.integer(sub("^port=", "", arg))
-    }
-    # Handle bare number as port
-    else if (grepl("^[0-9]+$", arg)) {
-      port <- as.integer(arg)
+  cwd <- NULL
+
+  # First arg is port (number)
+  if (length(args) >= 1 && grepl("^[0-9]+$", args[1])) {
+    port <- as.integer(args[1])
+  }
+
+  # Second arg is working directory
+  if (length(args) >= 2) {
+    cwd <- args[2]
+    if (dir.exists(cwd)) {
+      setwd(cwd)
     }
   }
 
