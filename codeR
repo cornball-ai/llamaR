@@ -324,7 +324,7 @@ Commands:
 
   # Cleanup
   cat(sprintf("\n%sGoodbye.%s\n", color$dim, color$reset))
-  mcp_close(conn)
+  suppressWarnings(mcp_close(conn))
 }
 
 # ============================================================================
