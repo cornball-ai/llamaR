@@ -581,55 +581,106 @@ handle_request <- function(req) {
 }
 
 # ============================================================================
-# Stdio transport
+# Transport layer
 # ============================================================================
-
-send_response <- function(response) {
-  if (is.null(response)) return()
-  json <- toJSON(response, auto_unbox = TRUE, null = "null")
-  cat(json, "\n", sep = "", file = stdout())
-  flush(stdout())
-}
 
 log_msg <- function(...) {
   cat(..., "\n", file = stderr())
 }
 
-run_server <- function() {
-  log_msg("codeR MCP server starting...")
+# Process a single request from a connection
+process_request <- function(line, send_fn) {
+  # Skip empty lines
+  if (nchar(trimws(line)) == 0) return(TRUE)
+
+  # Parse JSON-RPC request
+  req <- tryCatch(
+    fromJSON(line, simplifyVector = FALSE),
+    error = function(e) NULL
+  )
+
+  if (is.null(req)) {
+    log_msg("Invalid JSON received")
+    return(TRUE)
+  }
+
+  log_msg("Received:", req$method)
+
+  # Handle and respond
+  response <- handle_request(req)
+  if (!is.null(response)) {
+    json <- toJSON(response, auto_unbox = TRUE, null = "null")
+    send_fn(json)
+  }
+
+  TRUE
+}
+
+# Stdio transport (for Claude Desktop compatibility)
+run_stdio <- function() {
+  log_msg("codeR MCP server starting (stdio)...")
+
+  send_fn <- function(json) {
+    cat(json, "\n", sep = "", file = stdout())
+    flush(stdout())
+  }
 
   while (TRUE) {
-    # Read line from stdin
     line <- readLines(stdin(), n = 1, warn = FALSE)
-
-    # EOF - client disconnected
     if (length(line) == 0) {
       log_msg("Client disconnected")
       break
     }
-
-    # Skip empty lines
-    if (nchar(trimws(line)) == 0) next
-
-    # Parse JSON-RPC request
-    req <- tryCatch(
-      fromJSON(line, simplifyVector = FALSE),
-      error = function(e) NULL
-    )
-
-    if (is.null(req)) {
-      log_msg("Invalid JSON received")
-      next
-    }
-
-    log_msg("Received:", req$method)
-
-    # Handle and respond
-    response <- handle_request(req)
-    send_response(response)
+    process_request(line, send_fn)
   }
 
   log_msg("Server stopped")
+}
+
+# Socket transport (for llamaR/R clients)
+run_socket <- function(port) {
+  log_msg(sprintf("codeR MCP server starting (socket port %d)...", port))
+
+  # Create server socket
+  server <- serverSocket(port)
+  on.exit(close(server))
+
+  log_msg("Listening on port", port)
+
+  while (TRUE) {
+    # Accept client connection
+    client <- tryCatch(
+      socketAccept(server, blocking = TRUE, open = "r+b"),
+      error = function(e) NULL
+    )
+
+    if (is.null(client)) {
+      log_msg("Accept failed, retrying...")
+      next
+    }
+
+    log_msg("Client connected")
+
+    send_fn <- function(json) {
+      writeLines(json, client)
+    }
+
+    # Handle client requests
+    tryCatch({
+      while (TRUE) {
+        line <- readLines(client, n = 1, warn = FALSE)
+        if (length(line) == 0) {
+          log_msg("Client disconnected")
+          break
+        }
+        process_request(line, send_fn)
+      }
+    }, error = function(e) {
+      log_msg("Client error:", e$message)
+    })
+
+    tryCatch(close(client), error = function(e) NULL)
+  }
 }
 
 # ============================================================================
@@ -637,5 +688,23 @@ run_server <- function() {
 # ============================================================================
 
 if (!interactive()) {
-  run_server()
+  # Parse command line args
+  args <- commandArgs(trailingOnly = TRUE)
+
+  port <- NULL
+  i <- 1
+  while (i <= length(args)) {
+    if (args[i] == "--port" && i < length(args)) {
+      port <- as.integer(args[i + 1])
+      i <- i + 2
+    } else {
+      i <- i + 1
+    }
+  }
+
+  if (!is.null(port)) {
+    run_socket(port)
+  } else {
+    run_stdio()
+  }
 }
