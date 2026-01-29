@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codeR": {
+      "command": "r",
+      "args": ["/home/troy/codeR/mcp_server.R"]
+    }
+  }
+}
