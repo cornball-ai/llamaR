@@ -216,8 +216,7 @@ run_agent <- function(opts) {
   provider <- opts$provider
   model <- opts$model
 
-  # Get provider config for display
-  config <- .get_provider_config(provider)
+  # Display model
   display_model <- model %||% switch(provider,
     anthropic = "claude-sonnet-4-20250514",
     openai = "gpt-4o",
