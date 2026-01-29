@@ -1,0 +1,321 @@
+#!/usr/bin/env r
+#
+# codeR - Claude Code inspired CLI agent in R
+#
+# Usage: codeR [options]
+#   --provider   anthropic|openai|ollama (default: anthropic)
+#   --model      model name (default: provider-specific)
+#   --port       MCP server port (default: 7850)
+#
+
+suppressPackageStartupMessages({
+  library(jsonlite)
+  library(llamaR)
+})
+
+# ============================================================================
+# CLI argument parsing
+# ============================================================================
+
+parse_args <- function() {
+  args <- commandArgs(trailingOnly = TRUE)
+
+  opts <- list(
+    provider = "anthropic",
+    model = NULL,
+    port = 7850L,
+    server_script = file.path(dirname(sys.frame(1)$ofile %||% "."), "mcp_server.R")
+  )
+
+  i <- 1
+  while (i <= length(args)) {
+    arg <- args[i]
+    if (arg == "--provider" && i < length(args)) {
+      opts$provider <- args[i + 1]
+      i <- i + 2
+    } else if (arg == "--model" && i < length(args)) {
+      opts$model <- args[i + 1]
+      i <- i + 2
+    } else if (arg == "--port" && i < length(args)) {
+      opts$port <- as.integer(args[i + 1])
+      i <- i + 2
+    } else if (arg == "--help" || arg == "-h") {
+      cat("
+codeR - Claude Code inspired CLI agent
+
+Usage: codeR [options]
+
+Options:
+  --provider   LLM provider: anthropic, openai, ollama (default: anthropic)
+  --model      Model name (default: auto per provider)
+  --port       MCP server port (default: 7850)
+  --help       Show this help
+
+Commands (in chat):
+  /quit, /exit   Exit codeR
+  /tools         List available tools
+  /clear         Clear conversation history
+  /model <name>  Switch model
+  /provider <p>  Switch provider
+
+")
+      quit(save = "no", status = 0)
+    } else {
+      i <- i + 1
+    }
+  }
+
+  opts
+}
+
+# ============================================================================
+# Server management
+# ============================================================================
+
+start_server <- function(script, port) {
+  # Check if already running
+  conn <- tryCatch(
+    socketConnection("localhost", port, open = "r+b", blocking = TRUE, timeout = 1),
+    error = function(e) NULL
+  )
+
+  if (!is.null(conn)) {
+    close(conn)
+    return(TRUE)  # Already running
+  }
+
+  # Start server
+  if (.Platform$OS.type == "windows") {
+    system2("r", c(script, "--port", port), wait = FALSE, stdout = FALSE, stderr = FALSE)
+  } else {
+    system2("r", c(script, "--port", port), wait = FALSE,
+            stdout = "/dev/null", stderr = "/dev/null")
+  }
+
+  # Wait for startup
+  for (i in 1:20) {
+    Sys.sleep(0.25)
+    conn <- tryCatch(
+      socketConnection("localhost", port, open = "r+b", blocking = TRUE, timeout = 1),
+      error = function(e) NULL
+    )
+    if (!is.null(conn)) {
+      close(conn)
+      return(TRUE)
+    }
+  }
+
+  FALSE
+}
+
+# ============================================================================
+# Display helpers
+# ============================================================================
+
+color <- list(
+  reset = "\033[0m",
+  bold = "\033[1m",
+  dim = "\033[2m",
+  green = "\033[32m",
+  blue = "\033[34m",
+  cyan = "\033[36m",
+  yellow = "\033[33m",
+  magenta = "\033[35m"
+)
+
+print_banner <- function() {
+  cat(sprintf("%s
+   ___  ___  ___| |___
+  / __|/ _ \\/ _ \\  _/ -_)
+  \\___\\___/\\___/\\__\\___|  R
+%s
+", color$cyan, color$reset))
+  cat(sprintf("%sClaude Code inspired CLI agent%s\n", color$dim, color$reset))
+  cat(sprintf("%sType /help for commands, /quit to exit%s\n\n", color$dim, color$reset))
+}
+
+print_tool <- function(name, args) {
+  cat(sprintf("\n%s[%s]%s", color$yellow, name, color$reset))
+  if (length(args) > 0) {
+    args_str <- paste(names(args), sapply(args, function(x) {
+      if (is.character(x) && nchar(x) > 50) paste0(substr(x, 1, 47), "...")
+      else as.character(x)
+    }), sep = "=", collapse = ", ")
+    cat(sprintf(" %s%s%s", color$dim, args_str, color$reset))
+  }
+  cat("\n")
+}
+
+print_result <- function(text, max_lines = 20) {
+  lines <- strsplit(text, "\n")[[1]]
+  if (length(lines) > max_lines) {
+    cat(paste(lines[1:max_lines], collapse = "\n"))
+    cat(sprintf("\n%s... (%d more lines)%s\n", color$dim, length(lines) - max_lines, color$reset))
+  } else {
+    cat(text, "\n")
+  }
+}
+
+print_response <- function(text) {
+  cat(sprintf("\n%s%s%s\n", color$reset, text, color$reset))
+}
+
+# ============================================================================
+# Main agent loop
+# ============================================================================
+
+run_agent <- function(opts) {
+  print_banner()
+
+  # Start/connect to MCP server
+  cat(sprintf("%sStarting MCP server on port %d...%s\n", color$dim, opts$port, color$reset))
+
+  if (!file.exists(opts$server_script)) {
+    # Try current directory
+    opts$server_script <- "mcp_server.R"
+  }
+
+  if (!start_server(opts$server_script, opts$port)) {
+    cat(sprintf("%sError: Could not start MCP server%s\n", color$yellow, color$reset))
+    cat("Make sure mcp_server.R is in the current directory or codeR directory\n")
+    return(invisible(NULL))
+  }
+
+  # Connect
+  conn <- tryCatch(
+    mcp_connect(port = opts$port, name = "codeR"),
+    error = function(e) {
+      cat(sprintf("%sError connecting to server: %s%s\n", color$yellow, e$message, color$reset))
+      NULL
+    }
+  )
+
+  if (is.null(conn)) return(invisible(NULL))
+
+  cat(sprintf("%sConnected. %d tools available.%s\n\n",
+              color$dim, length(conn$tools), color$reset))
+
+  # Get tools for LLM
+  tools <- mcp_tools_for_api(conn)
+
+  # Tool handler
+  tool_handler <- function(name, args) {
+    print_tool(name, args)
+    result <- mcp_call(conn, name, args)
+    print_result(result$text %||% "")
+    result$text %||% ""
+  }
+
+  # Conversation state
+  history <- list()
+  provider <- opts$provider
+  model <- opts$model
+
+  # Get provider config for display
+  config <- .get_provider_config(provider)
+  display_model <- model %||% switch(provider,
+    anthropic = "claude-sonnet-4-20250514",
+    openai = "gpt-4o",
+    ollama = "llama3.2"
+  )
+
+  cat(sprintf("%s%s @ %s%s\n", color$dim, display_model, provider, color$reset))
+
+  # REPL
+  while (TRUE) {
+    # Prompt
+    prompt <- tryCatch(
+      readline(sprintf("%s>%s ", color$green, color$reset)),
+      error = function(e) NULL
+    )
+
+    # Handle EOF (Ctrl+D)
+    if (is.null(prompt)) {
+      cat("\n")
+      break
+    }
+
+    prompt <- trimws(prompt)
+    if (nchar(prompt) == 0) next
+
+    # Handle commands
+    if (startsWith(prompt, "/")) {
+      cmd_parts <- strsplit(prompt, "\\s+")[[1]]
+      cmd <- tolower(cmd_parts[1])
+      cmd_arg <- if (length(cmd_parts) > 1) cmd_parts[2] else NULL
+
+      if (cmd %in% c("/quit", "/exit", "/q")) {
+        break
+      } else if (cmd == "/tools") {
+        cat(sprintf("\n%sAvailable tools:%s\n", color$bold, color$reset))
+        for (tool in conn$tools) {
+          cat(sprintf("  %s%s%s - %s\n", color$cyan, tool$name, color$reset,
+                      tool$description %||% ""))
+        }
+        cat("\n")
+        next
+      } else if (cmd == "/clear") {
+        history <- list()
+        cat(sprintf("%sConversation cleared.%s\n", color$dim, color$reset))
+        next
+      } else if (cmd == "/model" && !is.null(cmd_arg)) {
+        model <- cmd_arg
+        cat(sprintf("%sModel set to: %s%s\n", color$dim, model, color$reset))
+        next
+      } else if (cmd == "/provider" && !is.null(cmd_arg)) {
+        provider <- cmd_arg
+        cat(sprintf("%sProvider set to: %s%s\n", color$dim, provider, color$reset))
+        next
+      } else if (cmd == "/help") {
+        cat("
+Commands:
+  /quit, /exit   Exit codeR
+  /tools         List available tools
+  /clear         Clear conversation history
+  /model <name>  Switch model
+  /provider <p>  Switch provider (anthropic, openai, ollama)
+  /help          Show this help
+
+")
+        next
+      } else {
+        cat(sprintf("%sUnknown command: %s%s\n", color$yellow, cmd, color$reset))
+        next
+      }
+    }
+
+    # Send to LLM with tools
+    result <- tryCatch({
+      agent(
+        prompt = prompt,
+        tools = tools,
+        tool_handler = tool_handler,
+        model = model,
+        provider = provider,
+        verbose = FALSE  # We handle display ourselves
+      )
+    }, error = function(e) {
+      cat(sprintf("%sError: %s%s\n", color$yellow, e$message, color$reset))
+      NULL
+    })
+
+    if (!is.null(result)) {
+      print_response(result$content)
+    }
+  }
+
+  # Cleanup
+  cat(sprintf("\n%sGoodbye.%s\n", color$dim, color$reset))
+  mcp_close(conn)
+}
+
+# ============================================================================
+# Entry point
+# ============================================================================
+
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+if (!interactive()) {
+  opts <- parse_args()
+  run_agent(opts)
+}
