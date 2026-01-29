@@ -18,4 +18,3 @@ Suggests:
     llm.api,
     tinytest
 Encoding: UTF-8
-Roxygen: list(markdown = TRUE)

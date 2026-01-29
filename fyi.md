@@ -16,9 +16,9 @@
 
 | Function | Arguments |
 |----------|-----------|
-| `%||%` | x, y |
 | `call_tool` | name, args |
 | `err` | text |
+| `format_session_list` | sessions |
 | `get_tools` |  |
 | `handle_request` | req |
 | `log_msg` | ... |
@@ -26,6 +26,14 @@
 | `process_request` | line, send_fn |
 | `run_socket` | port |
 | `run_stdio` |  |
+| `session_add_message` | session, role, content, tool_calls, name |
+| `session_id` |  |
+| `session_latest` | cwd |
+| `session_list` | cwd, n |
+| `session_load` | id, cwd |
+| `session_new` | provider, model, cwd |
+| `session_save` | session, cwd |
+| `sessions_dir` | cwd |
 | `tool_bash` | args |
 | `tool_chat` | args |
 | `tool_chat_models` | args |
