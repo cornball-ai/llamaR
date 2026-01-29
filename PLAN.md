@@ -82,10 +82,12 @@ Make the agent remember.
 - [x] `llamar --list` / `/sessions` to list sessions
 - [x] Project-local storage (`.llamar/sessions/`)
 
-### 3.2 Context Injection
-- [ ] `LLAMAR.md` — project-level instructions
-- [ ] `SOUL.md` — personality/behavior guidelines
-- [ ] Workspace-aware context loading
+### 3.2 Context Injection ✅
+- [x] `LLAMAR.md` — project-level instructions
+- [x] `fyi.md` — package/project introspection
+- [x] `AGENTS.md` — agent behavior guidelines
+- [x] Auto-load on startup, inject as system prompt
+- [x] `/context` command to show loaded files
 
 ### 3.3 Long-term Memory (later)
 - [ ] User facts/preferences (Markdown or SQLite)
@@ -193,5 +195,6 @@ User (terminal)
 2. ~~Implement core R tools (run_r, r_help, file ops)~~ ✅
 3. ~~Test MCP server mode with Claude Desktop~~ ✅
 4. ~~Implement session persistence~~ ✅
-5. Add `LLAMAR.md` context injection (3.2)
+5. ~~Add context injection (fyi.md, LLAMAR.md, AGENTS.md)~~ ✅
 6. Document skill format for fyi (2.3)
+7. Add long-term memory (3.3)

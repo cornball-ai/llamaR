@@ -21,6 +21,8 @@
 | `format_session_list` | sessions |
 | `get_tools` |  |
 | `handle_request` | req |
+| `list_context_files` | cwd |
+| `load_context` | cwd |
 | `log_msg` | ... |
 | `ok` | text |
 | `process_request` | line, send_fn |
