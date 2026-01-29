@@ -13,6 +13,13 @@ suppressPackageStartupMessages({
   library(llamaR)
 })
 
+# Debug: check API key
+if (FALSE) {  # Set to TRUE to debug
+  config <- llamaR:::.get_provider_config("anthropic")
+  cat("DEBUG - API key available:", nchar(config$api_key) > 0, "\n")
+  cat("DEBUG - API key prefix:", substr(config$api_key, 1, 15), "\n")
+}
+
 # ============================================================================
 # CLI argument parsing
 # ============================================================================
@@ -290,6 +297,14 @@ Commands:
     }
 
     # Send to LLM with tools
+    # Debug: check config before call
+    .config <- llamaR:::.get_provider_config(provider)
+    if (nchar(.config$api_key) == 0) {
+      cat(sprintf("%sWarning: No API key found for %s%s\n", color$yellow, provider, color$reset))
+      cat("Set ANTHROPIC_API_KEY in ~/.Renviron\n")
+      next
+    }
+
     result <- tryCatch({
       agent(
         prompt = prompt,
