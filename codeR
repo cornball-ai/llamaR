@@ -88,11 +88,11 @@ start_server <- function(script, port) {
     return(TRUE)  # Already running
   }
 
-  # Start server
+  # Start server (use Rscript for arg passing)
   if (.Platform$OS.type == "windows") {
-    system2("r", c(script, "--port", port), wait = FALSE, stdout = FALSE, stderr = FALSE)
+    system2("Rscript", c(script, port), wait = FALSE, stdout = FALSE, stderr = FALSE)
   } else {
-    system2("r", c(script, "--port", port), wait = FALSE,
+    system2("Rscript", c(script, port), wait = FALSE,
             stdout = "/dev/null", stderr = "/dev/null")
   }
 

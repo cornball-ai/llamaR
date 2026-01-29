@@ -689,16 +689,18 @@ run_socket <- function(port) {
 
 if (!interactive()) {
   # Parse command line args
+  # Use positional arg or key=value format for littler compatibility
   args <- commandArgs(trailingOnly = TRUE)
 
   port <- NULL
-  i <- 1
-  while (i <= length(args)) {
-    if (args[i] == "--port" && i < length(args)) {
-      port <- as.integer(args[i + 1])
-      i <- i + 2
-    } else {
-      i <- i + 1
+  for (arg in args) {
+    # Handle port=7850 format
+    if (grepl("^port=", arg)) {
+      port <- as.integer(sub("^port=", "", arg))
+    }
+    # Handle bare number as port
+    else if (grepl("^[0-9]+$", arg)) {
+      port <- as.integer(arg)
     }
   }
 
