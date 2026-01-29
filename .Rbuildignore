@@ -3,8 +3,5 @@
 ^\.git$
 ^\.github$
 ^CLAUDE\.md$
+^PLAN\.md$
 ^README\.md$
-^claude_desktop_config\.json$
-^llamar$
-^llamar\.R$
-^mcp_server\.R$
