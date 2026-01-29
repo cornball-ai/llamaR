@@ -294,37 +294,42 @@ tool_chat_models <- function(args) {
 call_tool <- function(name, args) {
   args <- args %||% list()
 
-  switch(name,
-    # File operations
-    "read_file" = tool_read_file(args),
-    "write_file" = tool_write_file(args),
-    "list_files" = tool_list_files(args),
-    "grep_files" = tool_grep_files(args),
+  # Wrap in tryCatch to prevent server crashes
+  tryCatch({
+    switch(name,
+      # File operations
+      "read_file" = tool_read_file(args),
+      "write_file" = tool_write_file(args),
+      "list_files" = tool_list_files(args),
+      "grep_files" = tool_grep_files(args),
 
-    # Code execution
-    "run_r" = tool_run_r(args),
-    "bash" = tool_bash(args),
+      # Code execution
+      "run_r" = tool_run_r(args),
+      "bash" = tool_bash(args),
 
-    # R-specific
-    "r_help" = tool_r_help(args),
-    "installed_packages" = tool_installed_packages(args),
+      # R-specific
+      "r_help" = tool_r_help(args),
+      "installed_packages" = tool_installed_packages(args),
 
-    # Data
-    "read_csv" = tool_read_csv(args),
+      # Data
+      "read_csv" = tool_read_csv(args),
 
-    # Web
-    "fetch_url" = tool_fetch_url(args),
+      # Web
+      "fetch_url" = tool_fetch_url(args),
 
-    # Git
-    "git_status" = tool_git_status(args),
-    "git_diff" = tool_git_diff(args),
-    "git_log" = tool_git_log(args),
+      # Git
+      "git_status" = tool_git_status(args),
+      "git_diff" = tool_git_diff(args),
+      "git_log" = tool_git_log(args),
 
-    # Chat
-    "chat" = tool_chat(args),
-    "chat_models" = tool_chat_models(args),
+      # Chat
+      "chat" = tool_chat(args),
+      "chat_models" = tool_chat_models(args),
 
-    # Unknown
-    err(paste("Unknown tool:", name))
-  )
+      # Unknown
+      err(paste("Unknown tool:", name))
+    )
+  }, error = function(e) {
+    err(paste("Tool error:", e$message))
+  })
 }

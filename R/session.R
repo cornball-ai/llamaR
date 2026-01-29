@@ -159,13 +159,18 @@ format_session_list <- function(sessions) {
     return("No sessions found.")
   }
 
+  # Helper to safely get string value
+  safe_str <- function(x, default = "?") {
+    if (is.null(x) || length(x) == 0 || identical(x, list())) default else as.character(x)
+  }
+
   lines <- vapply(sessions, function(s) {
     sprintf("  %s  %s  %d msgs  %s/%s",
-            s$id,
-            s$updated,
-            s$messages,
-            s$provider %||% "?",
-            s$model %||% "default")
+            safe_str(s$id, "?"),
+            safe_str(s$updated, "?"),
+            if (is.numeric(s$messages)) s$messages else 0L,
+            safe_str(s$provider, "?"),
+            safe_str(s$model, "default"))
   }, character(1))
 
   paste(c("Sessions:", lines), collapse = "\n")
