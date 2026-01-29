@@ -1,10 +1,6 @@
 # Utility functions for llamaR
 # Internal helpers used across the package
 
-#' Null coalescing operator
-#' @noRd
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
 #' Create successful MCP tool response
 #' @param text Character string to return
 #' @return List formatted as MCP tool result

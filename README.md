@@ -34,9 +34,9 @@ It can run:
 
 llamaR draws inspiration from several projects:
 
-- [btw](https://posit-dev.github.io/btw/) — directly inspired `fyi`
 - [moltbot](https://github.com/moltbot/moltbot) — the CLI-first, multi-channel personal agent pattern
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — terminal-native AI workflows
+- [btw](https://posit-dev.github.io/btw/) — directly inspired `fyi`
 
 llamaR and the mcptools ecosystems have parallel structure:
 

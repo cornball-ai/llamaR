@@ -165,8 +165,6 @@ print_response <- function(text) {
 # Main agent loop
 # ============================================================================
 
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
 run_agent <- function(opts) {
   print_banner()
 
