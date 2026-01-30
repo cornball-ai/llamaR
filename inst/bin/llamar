@@ -37,7 +37,8 @@ parse_args <- function() {
     port = config$port %||% 7850L,
     tools = config$tools,  # NULL = all tools
     context_warn_pct = config$context_warn_pct %||% 75L,
-    context_crit_pct = config$context_crit_pct %||% 90L,
+    context_high_pct = config$context_high_pct %||% 90L,
+    context_crit_pct = config$context_crit_pct %||% 95L,
     resume = FALSE,
     session = NULL,
     list = FALSE
@@ -301,20 +302,24 @@ format_tokens <- function(n) {
   }
 }
 
-print_context_indicator <- function(used, limit, warn_pct = 75, crit_pct = 90) {
+print_context_indicator <- function(used, limit, warn_pct = 75, high_pct = 90, crit_pct = 95) {
   pct <- (used / limit) * 100
+
+  # Don't show until we hit warning threshold
+  if (pct < warn_pct) return(invisible(NULL))
+
   used_str <- format_tokens(used)
   limit_str <- format_tokens(limit)
 
-  # Color based on usage (thresholds configurable)
+  # Color based on usage: yellow -> orange -> red
   if (pct >= crit_pct) {
     col <- color$bright_red
     warn <- " (consider /clear)"
-  } else if (pct >= warn_pct) {
-    col <- color$yellow
+  } else if (pct >= high_pct) {
+    col <- "\033[38;5;208m"  # Orange (256-color)
     warn <- ""
   } else {
-    col <- color$dim
+    col <- color$yellow
     warn <- ""
   }
 
@@ -446,7 +451,7 @@ run_agent <- function(opts) {
                 color$dim, length(session$messages), color$reset))
     if (session_tokens > 0) {
       print_context_indicator(session_tokens, context_limit,
-                              opts$context_warn_pct, opts$context_crit_pct)
+                              opts$context_warn_pct, opts$context_high_pct, opts$context_crit_pct)
     }
   }
 
@@ -581,7 +586,7 @@ Commands:
         session_tokens <- session_tokens + result$usage$total_tokens
         session$tokens <- session_tokens
         print_context_indicator(session_tokens, context_limit,
-                                opts$context_warn_pct, opts$context_crit_pct)
+                                opts$context_warn_pct, opts$context_high_pct, opts$context_crit_pct)
       }
 
       # Add assistant response to session
