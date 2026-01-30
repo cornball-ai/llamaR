@@ -316,7 +316,7 @@ tool_chat <- function(args) {
       temperature = temperature,
       stream = FALSE
     )
-    ok(result)
+    ok(result$content)
   }, error = function(e) {
     err(paste("Chat error:", e$message))
   })
