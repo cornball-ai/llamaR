@@ -5,7 +5,6 @@ defaults <- llamaR:::default_context_files()
 expect_true("README.md" %in% defaults)
 expect_true("PLAN.md" %in% defaults)
 expect_true("fyi.md" %in% defaults)
-expect_true("LLAMAR.md" %in% defaults)
 expect_true("AGENTS.md" %in% defaults)
 
 # Setup: use a fresh temp directory

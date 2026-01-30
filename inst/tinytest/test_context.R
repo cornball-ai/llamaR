@@ -40,24 +40,17 @@ writeLines(c("# fyi: mypackage", "", "This is package info."), file.path(testdir
 files <- llamaR:::list_context_files(testdir)
 expect_equal(length(files), 3)
 
-# Create LLAMAR.md
-writeLines(c("# Project Instructions", "", "Do this, not that."), file.path(testdir, "LLAMAR.md"))
-
-files <- llamaR:::list_context_files(testdir)
-expect_equal(length(files), 4)
-
 # Create AGENTS.md
 writeLines("# Agent Guidelines", file.path(testdir, "AGENTS.md"))
 
 files <- llamaR:::list_context_files(testdir)
-expect_equal(length(files), 5)
+expect_equal(length(files), 4)
 
 # Test all are included in context
 ctx <- llamaR:::load_context(testdir)
 expect_true(grepl("README.md", ctx))
 expect_true(grepl("PLAN.md", ctx))
 expect_true(grepl("fyi.md", ctx))
-expect_true(grepl("LLAMAR.md", ctx))
 expect_true(grepl("AGENTS.md", ctx))
 expect_true(grepl("Agent Guidelines", ctx))
 

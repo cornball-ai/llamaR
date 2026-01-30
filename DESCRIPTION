@@ -15,6 +15,7 @@ Depends:
 Imports:
     jsonlite
 Suggests:
+    fyi,
     llm.api,
     tinytest
 Encoding: UTF-8
