@@ -186,6 +186,64 @@ tool_read_csv <- function(args) {
 
 # Web ----
 
+tool_web_search <- function(args) {
+  query <- args$query
+  max_results <- args$max_results %||% 5L
+
+  api_key <- Sys.getenv("TAVILY_API_KEY")
+  if (nchar(api_key) == 0) {
+    return(err("TAVILY_API_KEY not set in .Renviron"))
+  }
+
+  tryCatch({
+    body <- list(
+      api_key = api_key,
+      query = query,
+      max_results = max_results,
+      include_answer = TRUE
+    )
+
+    h <- curl::new_handle()
+    curl::handle_setopt(h,
+      customrequest = "POST",
+      postfields = jsonlite::toJSON(body, auto_unbox = TRUE)
+    )
+    curl::handle_setheaders(h, "Content-Type" = "application/json")
+
+    resp <- curl::curl_fetch_memory("https://api.tavily.com/search", handle = h)
+
+    if (resp$status_code >= 400) {
+      return(err(paste("Tavily API error:", resp$status_code)))
+    }
+
+    data <- jsonlite::fromJSON(rawToChar(resp$content), simplifyVector = FALSE)
+
+    # Format results
+    parts <- character()
+
+    # Include AI-generated answer if available
+    if (!is.null(data$answer) && nchar(data$answer) > 0) {
+      parts <- c(parts, "Answer:", data$answer, "")
+    }
+
+    parts <- c(parts, "Results:")
+    for (r in data$results) {
+      parts <- c(parts, sprintf("- %s", r$title))
+      parts <- c(parts, sprintf("  %s", r$url))
+      if (!is.null(r$content)) {
+        snippet <- substr(r$content, 1, 200)
+        if (nchar(r$content) > 200) snippet <- paste0(snippet, "...")
+        parts <- c(parts, sprintf("  %s", snippet))
+      }
+      parts <- c(parts, "")
+    }
+
+    ok(paste(parts, collapse = "\n"))
+  }, error = function(e) {
+    err(paste("Search error:", e$message))
+  })
+}
+
 tool_fetch_url <- function(args) {
   url <- args$url
   method <- toupper(args$method %||% "GET")
@@ -328,6 +386,7 @@ call_tool <- function(name, args) {
       "read_csv" = tool_read_csv(args),
 
       # Web
+      "web_search" = tool_web_search(args),
       "fetch_url" = tool_fetch_url(args),
 
       # Git

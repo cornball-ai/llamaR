@@ -7,7 +7,7 @@ tool_categories <- list(
   code = c("run_r", "bash"),
   r = c("r_help", "installed_packages"),
   data = c("read_csv"),
-  web = c("fetch_url"),
+  web = c("web_search", "fetch_url"),
   git = c("git_status", "git_diff", "git_log"),
   chat = c("chat", "chat_models")
 )
@@ -137,6 +137,18 @@ get_tools <- function(filter = NULL) {
     ),
 
     # Web
+    list(
+      name = "web_search",
+      description = "Search the web using Tavily API",
+      inputSchema = list(
+        type = "object",
+        properties = list(
+          query = list(type = "string", description = "Search query"),
+          max_results = list(type = "integer", description = "Max results to return (default: 5)")
+        ),
+        required = list("query")
+      )
+    ),
     list(
       name = "fetch_url",
       description = "Fetch content from a URL",

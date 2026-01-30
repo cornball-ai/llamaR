@@ -37,6 +37,7 @@ User (terminal)
                 ├── File tools (read/write/list/grep)
                 ├── R tools (run_r, r_help, installed_packages)
                 ├── System tools (bash, git_*)
+                ├── Web tools (web_search, fetch_url)
                 └── Chat tools (chat, chat_models via llm.api)
 ```
 
@@ -67,7 +68,7 @@ inst/
 | `.llamar/sessions/` | Project-local session storage |
 | `.llamar/config.json` | Project config (provider, model, context_files) |
 | `~/.llamar/config.json` | Global config defaults |
-| `LLAMAR.md` | Project-specific agent instructions |
+| `AGENTS.md` | Project-specific agent instructions |
 
 ## Context Files (Auto-loaded)
 
@@ -75,8 +76,17 @@ Default files loaded into system prompt (configurable via config):
 - `README.md` - Project description
 - `PLAN.md` - Development roadmap
 - `fyi.md` - Package introspection (from fyi package)
-- `LLAMAR.md` - Agent instructions
 - `AGENTS.md` - Behavior guidelines
+
+## Environment Variables
+
+Set in `~/.Renviron`:
+
+| Variable | Required For |
+|----------|--------------|
+| `ANTHROPIC_API_KEY` | Anthropic provider |
+| `OPENAI_API_KEY` | OpenAI provider |
+| `TAVILY_API_KEY` | web_search tool |
 
 ## Config Example
 

@@ -13,6 +13,7 @@ BugReports: https://github.com/cornball-ai/llamaR/issues
 Depends:
     R (>= 4.4.0)
 Imports:
+    curl,
     jsonlite
 Suggests:
     fyi,
