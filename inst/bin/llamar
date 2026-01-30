@@ -39,6 +39,7 @@ parse_args <- function() {
     context_warn_pct = config$context_warn_pct %||% 75L,
     context_high_pct = config$context_high_pct %||% 90L,
     context_crit_pct = config$context_crit_pct %||% 95L,
+    context_compact_pct = config$context_compact_pct %||% 80L,  # Auto-compact threshold
     resume = FALSE,
     session = NULL,
     list = FALSE
@@ -89,6 +90,7 @@ Commands (in chat):
   /quit, /exit   Exit llamar
   /tools         List available tools
   /clear         Clear conversation (keeps session)
+  /compact       Summarize conversation to free context
   /sessions      List sessions for this directory
   /context       Show loaded context files
   /model <name>  Switch model
@@ -327,6 +329,61 @@ print_context_indicator <- function(used, limit, warn_pct = 75, high_pct = 90, c
               col, used_str, limit_str, pct, warn, color$reset))
 }
 
+# ============================================================================
+# Auto-compaction
+# ============================================================================
+
+compact_prompt <- '
+Summarize this conversation concisely, preserving:
+1. What was accomplished (completed tasks, files modified)
+2. Current work in progress
+3. Key decisions and constraints mentioned
+4. Pending tasks or next steps
+5. Any errors encountered and their resolution
+
+Be specific about file names, function names, and technical details.
+Format as a structured summary the assistant can use to continue the work.
+'
+
+do_compact <- function(session, provider, model, system_prompt) {
+  cat(sprintf("%s\nAuto-compacting conversation...%s\n", color$cyan, color$reset))
+
+  # Build conversation text from messages
+  conv_text <- vapply(session$messages, function(m) {
+    sprintf("[%s]: %s", m$role, m$content)
+  }, character(1))
+  conv_text <- paste(conv_text, collapse = "\n\n")
+
+  # Ask LLM to summarize
+  summary_prompt <- sprintf("%s\n\n---\nConversation to summarize:\n%s", compact_prompt, conv_text)
+
+  result <- tryCatch({
+    llm.api::chat(
+      prompt = summary_prompt,
+      provider = provider,
+      model = model,
+      system = "You are a helpful assistant that creates concise conversation summaries.",
+      temperature = 0.3
+    )
+  }, error = function(e) {
+    cat(sprintf("%sCompaction failed: %s%s\n", color$bright_magenta, e$message, color$reset))
+    NULL
+  })
+
+  if (is.null(result)) {
+    return(NULL)
+  }
+
+  summary <- result$content
+
+  # Estimate tokens in summary (~4 chars per token)
+  new_tokens <- as.integer(nchar(summary) / 4)
+
+  cat(sprintf("%sCompacted to ~%s tokens%s\n", color$green, format_tokens(new_tokens), color$reset))
+
+  list(summary = summary, tokens = new_tokens)
+}
+
 
 # ============================================================================
 # Main agent loop
@@ -495,6 +552,23 @@ run_agent <- function(opts) {
         llamaR:::session_save(session)
         cat(sprintf("%sConversation cleared.%s\n", color$dim, color$reset))
         next
+      } else if (cmd == "/compact") {
+        if (length(session$messages) < 2) {
+          cat(sprintf("%sNothing to compact.%s\n", color$dim, color$reset))
+        } else {
+          compact_result <- do_compact(session, provider, display_model, system_prompt)
+          if (!is.null(compact_result)) {
+            session$messages <- list(
+              list(role = "user", content = "[Previous conversation summary]"),
+              list(role = "assistant", content = compact_result$summary)
+            )
+            session_tokens <- compact_result$tokens
+            session$tokens <- session_tokens
+            session$compactions <- (session$compactions %||% 0L) + 1L
+            llamaR:::session_save(session)
+          }
+        }
+        next
       } else if (cmd == "/sessions") {
         sessions <- llamaR:::session_list(cwd)
         cat(llamaR:::format_session_list(sessions), "\n")
@@ -528,6 +602,7 @@ Commands:
   /quit, /exit   Exit llamar
   /tools         List available tools
   /clear         Clear conversation (keeps session)
+  /compact       Summarize conversation to free context
   /sessions      List sessions for this directory
   /context       Show loaded context files
   /model <name>  Switch model
@@ -587,6 +662,22 @@ Commands:
         session$tokens <- session_tokens
         print_context_indicator(session_tokens, context_limit,
                                 opts$context_warn_pct, opts$context_high_pct, opts$context_crit_pct)
+
+        # Auto-compact if approaching limit
+        pct <- (session_tokens / context_limit) * 100
+        if (pct >= opts$context_compact_pct && length(session$messages) > 2) {
+          compact_result <- do_compact(session, provider, display_model, system_prompt)
+          if (!is.null(compact_result)) {
+            # Replace session with summary
+            session$messages <- list(
+              list(role = "user", content = "[Previous conversation summary]"),
+              list(role = "assistant", content = compact_result$summary)
+            )
+            session_tokens <- compact_result$tokens
+            session$tokens <- session_tokens
+            session$compactions <- (session$compactions %||% 0L) + 1L
+          }
+        }
       }
 
       # Add assistant response to session

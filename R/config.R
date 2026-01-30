@@ -72,6 +72,10 @@ load_config <- function(cwd = getwd()) {
   if (is.null(config$context_crit_pct)) {
     config$context_crit_pct <- 95L
   }
+  # Auto-compaction threshold (percentage)
+  if (is.null(config$context_compact_pct)) {
+    config$context_compact_pct <- 80L
+  }
 
   config
 }
