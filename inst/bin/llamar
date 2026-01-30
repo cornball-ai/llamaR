@@ -248,6 +248,7 @@ print_response <- function(text) {
   cat(sprintf("\n%s%s\n", rendered, color$reset))
 }
 
+
 # ============================================================================
 # Main agent loop
 # ============================================================================
@@ -369,7 +370,7 @@ run_agent <- function(opts) {
 
   # REPL
   while (TRUE) {
-    # Prompt and read input via bash (avoids R's stdin echo)
+    # Read input via bash read
     prompt <- system(
       sprintf('read -p "%s>%s " line && echo "$line"', color$green, color$reset),
       intern = TRUE
