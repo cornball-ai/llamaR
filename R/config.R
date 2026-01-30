@@ -61,6 +61,13 @@ load_config <- function(cwd = getwd()) {
   if (is.null(config$provider)) {
     config$provider <- "anthropic"
   }
+  # Context warning thresholds (percentage)
+  if (is.null(config$context_warn_pct)) {
+    config$context_warn_pct <- 75L
+  }
+  if (is.null(config$context_crit_pct)) {
+    config$context_crit_pct <- 90L
+  }
 
   config
 }

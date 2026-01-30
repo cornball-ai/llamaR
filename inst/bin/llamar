@@ -36,6 +36,8 @@ parse_args <- function() {
     model = config$model,
     port = config$port %||% 7850L,
     tools = config$tools,  # NULL = all tools
+    context_warn_pct = config$context_warn_pct %||% 75L,
+    context_crit_pct = config$context_crit_pct %||% 90L,
     resume = FALSE,
     session = NULL,
     list = FALSE
@@ -248,6 +250,78 @@ print_response <- function(text) {
   cat(sprintf("\n%s%s\n", rendered, color$reset))
 }
 
+# ============================================================================
+# Context tracking
+# ============================================================================
+
+# Model context limits (in tokens)
+context_limits <- list(
+  # Anthropic
+  "claude-sonnet-4-20250514" = 200000L,
+  "claude-opus-4-20250514" = 200000L,
+  "claude-3-5-sonnet-20241022" = 200000L,
+  "claude-3-opus-20240229" = 200000L,
+  "claude-3-haiku-20240307" = 200000L,
+  # OpenAI
+  "gpt-4o" = 128000L,
+  "gpt-4o-mini" = 128000L,
+  "gpt-4-turbo" = 128000L,
+  "gpt-4" = 8192L,
+  "gpt-3.5-turbo" = 16385L,
+  # Ollama (varies by model)
+  "llama3.2" = 128000L,
+  "llama3.1" = 128000L,
+  "mistral" = 32000L,
+  "mixtral" = 32000L,
+  "qwen2.5" = 32000L
+)
+
+get_context_limit <- function(model) {
+  # Try exact match first
+  if (!is.null(context_limits[[model]])) {
+    return(context_limits[[model]])
+  }
+  # Try prefix match
+  for (name in names(context_limits)) {
+    if (startsWith(model, name) || startsWith(name, model)) {
+      return(context_limits[[name]])
+    }
+  }
+  # Default
+  128000L
+}
+
+format_tokens <- function(n) {
+  if (n >= 1000000) {
+    sprintf("%.1fM", n / 1000000)
+  } else if (n >= 1000) {
+    sprintf("%.1fK", n / 1000)
+  } else {
+    as.character(n)
+  }
+}
+
+print_context_indicator <- function(used, limit, warn_pct = 75, crit_pct = 90) {
+  pct <- (used / limit) * 100
+  used_str <- format_tokens(used)
+  limit_str <- format_tokens(limit)
+
+  # Color based on usage (thresholds configurable)
+  if (pct >= crit_pct) {
+    col <- color$bright_red
+    warn <- " (consider /clear)"
+  } else if (pct >= warn_pct) {
+    col <- color$yellow
+    warn <- ""
+  } else {
+    col <- color$dim
+    warn <- ""
+  }
+
+  cat(sprintf("%s[%s / %s tokens %.0f%%]%s%s\n",
+              col, used_str, limit_str, pct, warn, color$reset))
+}
+
 
 # ============================================================================
 # Main agent loop
@@ -362,10 +436,18 @@ run_agent <- function(opts) {
 
   cat(sprintf("%s%s @ %s%s\n", color$dim, display_model, provider, color$reset))
 
+  # Track token usage for context indicator
+  session_tokens <- session$tokens %||% 0L
+  context_limit <- get_context_limit(display_model)
+
   # Show resumed message count
   if (length(session$messages) > 0) {
     cat(sprintf("%sResumed session with %d messages.%s\n",
                 color$dim, length(session$messages), color$reset))
+    if (session_tokens > 0) {
+      print_context_indicator(session_tokens, context_limit,
+                              opts$context_warn_pct, opts$context_crit_pct)
+    }
   }
 
   # REPL
@@ -403,6 +485,8 @@ run_agent <- function(opts) {
         next
       } else if (cmd == "/clear") {
         session$messages <- list()
+        session$tokens <- 0L
+        session_tokens <- 0L
         llamaR:::session_save(session)
         cat(sprintf("%sConversation cleared.%s\n", color$dim, color$reset))
         next
@@ -491,6 +575,14 @@ Commands:
 
     if (!is.null(result)) {
       print_response(result$content)
+
+      # Update token count and show context indicator
+      if (!is.null(result$usage)) {
+        session_tokens <- session_tokens + result$usage$total_tokens
+        session$tokens <- session_tokens
+        print_context_indicator(session_tokens, context_limit,
+                                opts$context_warn_pct, opts$context_crit_pct)
+      }
 
       # Add assistant response to session
       session <- llamaR:::session_add_message(session, "assistant", result$content)
