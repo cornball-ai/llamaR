@@ -1,5 +1,7 @@
 # llamaR
 
+<img src="man/figures/llamaR.png" alt="llamaR logo" width="200" />
+
 **A CLI-first AI coding agent, written in R.**
 
 Built on the Model Context Protocol (MCP). Connects to LLMs (Anthropic, OpenAI, Ollama) and gives them tools to act.
