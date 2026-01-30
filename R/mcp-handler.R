@@ -19,7 +19,7 @@ handle_request <- function(req) {
 
     "notifications/initialized" = NULL,  # No response for notifications
 
-    "tools/list" = list(tools = get_tools()),
+    "tools/list" = list(tools = get_tools(getOption("llamar.tools"))),
 
     "tools/call" = call_tool(params$name, params$arguments),
 

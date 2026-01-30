@@ -104,23 +104,36 @@ tool_r_help <- function(args) {
   topic <- args$topic
   pkg <- args$package
 
-  result <- tryCatch({
-    if (!is.null(pkg)) {
-      help_file <- help(topic, package = (pkg))
+  # Use fyi package for documentation (generates fyi.md-style output)
+  if (!requireNamespace("fyi", quietly = TRUE)) {
+    return(err("fyi package not installed. Install with: install.packages('fyi')"))
+  }
+
+  tryCatch({
+    # If topic looks like a package name, get full package info
+    if (is.null(pkg) && topic %in% rownames(installed.packages())) {
+      out <- capture.output(fyi::fyi(topic))
+      ok(paste(out, collapse = "\n"))
     } else {
-      help_file <- help(topic)
-    }
+      # For functions, try to find the package and get info
+      pkg_name <- pkg %||% tryCatch({
+        # Find which package contains this function
+        envs <- search()
+        for (e in envs) {
+          if (exists(topic, where = e, mode = "function")) {
+            sub("^package:", "", e)
+          }
+        }
+        NULL
+      }, error = function(e) NULL)
 
-    if (length(help_file) == 0) {
-      return(err(paste("No help found for:", topic)))
+      if (!is.null(pkg_name) && pkg_name != ".GlobalEnv") {
+        out <- capture.output(fyi::fyi(pkg_name))
+        ok(paste(out, collapse = "\n"))
+      } else {
+        err(paste("Could not find package for:", topic))
+      }
     }
-
-    # Capture help text
-    out <- capture.output(tools:::Rd2txt(
-      utils:::.getHelpFile(help_file),
-      options = list(width = 80)
-    ))
-    ok(paste(out, collapse = "\n"))
   }, error = function(e) {
     err(paste("Help error:", e$message))
   })

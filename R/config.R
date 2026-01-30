@@ -5,7 +5,7 @@
 #' @noRd
 default_context_files <- function() {
 
-  c("README.md", "PLAN.md", "fyi.md", "LLAMAR.md", "AGENTS.md")
+  c("README.md", "PLAN.md", "fyi.md", "AGENTS.md")
 }
 
 #' Load configuration from JSON file
