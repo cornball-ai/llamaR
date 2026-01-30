@@ -165,11 +165,20 @@ color <- list(
   reset = "\033[0m",
   bold = "\033[1m",
   dim = "\033[2m",
+  red = "\033[31m",
   green = "\033[32m",
-  blue = "\033[34m",
-  cyan = "\033[36m",
   yellow = "\033[33m",
-  magenta = "\033[35m"
+  blue = "\033[34m",
+  magenta = "\033[35m",
+  cyan = "\033[36m",
+  white = "\033[37m",
+  # Bright variants
+  bright_red = "\033[91m",
+  bright_green = "\033[92m",
+  bright_yellow = "\033[93m",
+  bright_blue = "\033[94m",
+  bright_magenta = "\033[95m",
+  bright_cyan = "\033[96m"
 )
 
 print_banner <- function(session_id = NULL) {
@@ -198,20 +207,45 @@ print_tool <- function(name, args) {
   }
 }
 
-print_result <- function(text, max_lines = 3) {
-  # Brief preview - model will summarize the full result
+print_result <- function(text) {
+  # Minimal output - just show line count, model will summarize
   lines <- strsplit(text, "\n")[[1]]
-  if (length(lines) > max_lines) {
-    cat(sprintf("%s", color$dim))
-    cat(paste(lines[1:max_lines], collapse = "\n"))
-    cat(sprintf("\n... (%d more lines)%s\n", length(lines) - max_lines, color$reset))
-  } else if (nchar(text) > 0) {
-    cat(sprintf("%s%s%s\n", color$dim, text, color$reset))
+  n <- length(lines)
+  if (n > 1) {
+    cat(sprintf("%s(%d lines)%s\n", color$dim, n, color$reset))
   }
+  # Single line results shown inline with tool call
+}
+
+render_markdown <- function(text) {
+  # Bold: **text** or __text__ - bright white
+  text <- gsub("\\*\\*([^*]+)\\*\\*", paste0(color$bold, color$white, "\\1", color$reset), text)
+  text <- gsub("__([^_]+)__", paste0(color$bold, color$white, "\\1", color$reset), text)
+
+  # Italic: *text* or _text_ (but not inside words)
+  text <- gsub("(?<![\\w*])\\*([^*]+)\\*(?![\\w*])", paste0(color$dim, "\\1", color$reset), text, perl = TRUE)
+  text <- gsub("(?<![\\w_])_([^_]+)_(?![\\w_])", paste0(color$dim, "\\1", color$reset), text, perl = TRUE)
+
+  # Inline code: `code` - cyan
+  text <- gsub("`([^`]+)`", paste0(color$bright_cyan, "\\1", color$reset), text)
+
+  # Headers - colorful
+  text <- gsub("(?m)^### (.+)$", paste0(color$bright_blue, "\\1", color$reset), text, perl = TRUE)
+  text <- gsub("(?m)^## (.+)$", paste0(color$bold, color$bright_blue, "\\1", color$reset), text, perl = TRUE)
+  text <- gsub("(?m)^# (.+)$", paste0(color$bold, color$bright_magenta, "\\1", color$reset), text, perl = TRUE)
+
+  # Bullet points - green bullet
+  text <- gsub("(?m)^(\\s*)[-*] ", paste0("\\1", color$green, "•", color$reset, " "), text, perl = TRUE)
+
+  # Links: [text](url) - blue text, dim url
+  text <- gsub("\\[([^]]+)\\]\\(([^)]+)\\)", paste0(color$bright_blue, "\\1", color$reset, " ", color$dim, "(\\2)", color$reset), text)
+
+  text
 }
 
 print_response <- function(text) {
-  cat(sprintf("\n%s%s%s\n", color$reset, text, color$reset))
+  rendered <- render_markdown(text)
+  cat(sprintf("\n%s%s\n", rendered, color$reset))
 }
 
 # ============================================================================
@@ -264,7 +298,7 @@ run_agent <- function(opts) {
   cat(sprintf("%sStarting MCP server on port %d...%s\n", color$dim, opts$port, color$reset))
 
   if (!start_server(opts$port, opts$tools)) {
-    cat(sprintf("%sError: Could not start MCP server%s\n", color$yellow, color$reset))
+    cat(sprintf("%sError: Could not start MCP server%s\n", color$bright_magenta, color$reset))
     cat("Make sure llamaR package is installed.\n")
     return(invisible(NULL))
   }
@@ -273,7 +307,7 @@ run_agent <- function(opts) {
   conn <- tryCatch(
     mcp_connect(port = opts$port, name = "llamar"),
     error = function(e) {
-      cat(sprintf("%sError connecting to server: %s%s\n", color$yellow, e$message, color$reset))
+      cat(sprintf("%sError connecting to server: %s%s\n", color$bright_magenta, e$message, color$reset))
       NULL
     }
   )
@@ -304,7 +338,7 @@ run_agent <- function(opts) {
     result <- tryCatch({
       mcp_call(conn, name, args)
     }, error = function(e) {
-      cat(sprintf("%sTool error: %s%s\n", color$yellow, e$message, color$reset))
+      cat(sprintf("%sTool error: %s%s\n", color$bright_magenta, e$message, color$reset))
       list(text = paste("Error:", e$message))
     })
     text <- result$text %||% ""
@@ -450,7 +484,7 @@ Commands:
         verbose = FALSE  # We handle display ourselves
       )
     }, error = function(e) {
-      cat(sprintf("%sError: %s%s\n", color$yellow, e$message, color$reset))
+      cat(sprintf("%sError: %s%s\n", color$bright_magenta, e$message, color$reset))
       NULL
     })
 

@@ -79,10 +79,15 @@ llamaR exposes tools to LLMs:
 |`list_files`        |List directory contents               |
 |`git`               |Status, diff, commit, log             |
 |`run_r`             |Execute R code in a persistent session|
-|`r_help`            |Query R documentation                 |
+|`r_help`            |Query R documentation via fyi         |
 |`installed_packages`|List and search R packages            |
+|`web_search`        |Search the web via Tavily             |
 
 Plus any tools from connected MCP servers.
+
+### Web Search
+
+Web search is powered by [Tavily](https://tavily.com), an AI-native search engine with a free tier. Set `TAVILY_API_KEY` in `~/.Renviron` to enable.
 
 -----
 
