@@ -106,6 +106,22 @@ load_config <- function (cwd = getwd()) {
         config$skill_timeout <- 30L
     }
 
+    # Signal transport config
+    if (is.null(config$signal)) {
+        config$signal <- list()
+    }
+    if (is.null(config$signal$enabled)) {
+        config$signal$enabled <- FALSE
+    }
+    if (is.null(config$signal$host)) {
+        config$signal$host <- "127.0.0.1"
+    }
+    if (is.null(config$signal$port)) {
+        config$signal$port <- 8080L
+    }
+    # config$signal$account - required, no default
+    # config$signal$allow_from - optional allowlist
+
     config
 }
 

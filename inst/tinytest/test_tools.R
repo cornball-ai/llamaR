@@ -7,9 +7,9 @@ expect_true(length(tools) > 0)
 
 # Check each tool has required fields
 for (tool in tools) {
-  expect_true("name" %in% names(tool))
-  expect_true("description" %in% names(tool))
-  expect_true("inputSchema" %in% names(tool))
+    expect_true("name" %in% names(tool))
+    expect_true("description" %in% names(tool))
+    expect_true("inputSchema" %in% names(tool))
 }
 
 # Test specific tools exist
@@ -32,3 +32,4 @@ err_result <- llamaR:::err("error")
 expect_true(is.list(err_result))
 expect_true(err_result$isError)
 expect_equal(err_result$content[[1]]$text, "error")
+

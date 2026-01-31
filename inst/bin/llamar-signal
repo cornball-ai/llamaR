@@ -1,0 +1,300 @@
+#!/usr/bin/env Rscript
+#
+# llamar-signal - Signal bot using llamaR
+#
+# Usage: llamar-signal [options]
+#   --account    Signal phone number (required, e.g., +15551234567)
+#   --host       signal-cli daemon host (default: 127.0.0.1)
+#   --port       signal-cli daemon port (default: 8080)
+#   --allow      Comma-separated list of allowed sender numbers
+#   --provider   LLM provider: anthropic, openai, ollama (default: anthropic)
+#   --model      Model name (default: provider-specific)
+#
+# Requires signal-cli running in daemon mode:
+#   signal-cli -a +15551234567 daemon --http 127.0.0.1:8080
+
+# Load .Renviron
+renviron <- path.expand("~/.Renviron")
+if (file.exists(renviron)) readRenviron(renviron)
+
+suppressPackageStartupMessages({
+    library(jsonlite)
+    library(curl)
+    library(llm.api)
+    library(llamaR)
+})
+
+# ============================================================================
+# CLI argument parsing
+# ============================================================================
+
+parse_args <- function () {
+    args <- commandArgs(trailingOnly = TRUE)
+
+    opts <- list(
+        account = NULL,
+        host = "127.0.0.1",
+        port = 8080L,
+        allow_from = character(),
+        provider = "anthropic",
+        model = NULL,
+        mcp_port = 7850L
+    )
+
+    i <- 1
+    while (i <= length(args)) {
+        arg <- args[i]
+        if (arg == "--account" && i < length(args)) {
+            opts$account <- args[i + 1]
+            i <- i + 2
+        } else if (arg == "--host" && i < length(args)) {
+            opts$host <- args[i + 1]
+            i <- i + 2
+        } else if (arg == "--port" && i < length(args)) {
+            opts$port <- as.integer(args[i + 1])
+            i <- i + 2
+        } else if (arg == "--allow" && i < length(args)) {
+            opts$allow_from <- strsplit(args[i + 1], ",")[[1]]
+            i <- i + 2
+        } else if (arg == "--provider" && i < length(args)) {
+            opts$provider <- args[i + 1]
+            i <- i + 2
+        } else if (arg == "--model" && i < length(args)) {
+            opts$model <- args[i + 1]
+            i <- i + 2
+        } else if (arg == "--help" || arg == "-h") {
+            cat("
+llamar-signal - Signal bot using llamaR
+
+Usage: llamar-signal --account +15551234567 [options]
+
+Options:
+  --account    Signal phone number (required)
+  --host       signal-cli daemon host (default: 127.0.0.1)
+  --port       signal-cli daemon port (default: 8080)
+  --allow      Comma-separated allowed sender numbers
+  --provider   LLM provider: anthropic, openai, ollama
+  --model      Model name
+
+Prerequisites:
+  1. Install signal-cli (requires Java)
+  2. Link your Signal account:
+     signal-cli link -n \"llamar\"
+  3. Start the daemon:
+     signal-cli -a +15551234567 daemon --http 127.0.0.1:8080
+  4. Run this bot:
+     llamar-signal --account +15551234567
+
+")
+            quit(save = "no", status = 0)
+        } else {
+            i <- i + 1
+        }
+    }
+
+    if (is.null(opts$account)) {
+        cat("Error: --account is required\n")
+        cat("Usage: llamar-signal --account +15551234567\n")
+        quit(save = "no", status = 1)
+    }
+
+    opts
+}
+
+# ============================================================================
+# Display helpers
+# ============================================================================
+
+color <- list(
+    reset = "\033[0m",
+    dim = "\033[2m",
+    cyan = "\033[36m",
+    green = "\033[32m",
+    yellow = "\033[33m",
+    magenta = "\033[35m"
+)
+
+log_msg <- function (...) {
+    ts <- format(Sys.time(), "%H:%M:%S")
+    cat(sprintf("%s[%s]%s ", color$dim, ts, color$reset), ..., "\n", sep = "")
+}
+
+# ============================================================================
+# MCP Server management
+# ============================================================================
+
+start_mcp_server <- function (port) {
+    # Check if already running
+    conn <- tryCatch(
+        socketConnection("localhost", port, open = "r+b", blocking = TRUE, timeout = 1),
+        error = function (e) NULL
+    )
+
+    if (!is.null(conn)) {
+        close(conn)
+        return(TRUE)
+    }
+
+    # Start server
+    cwd <- getwd()
+    cmd <- sprintf('llamaR::serve(port = %d, cwd = "%s")', port, cwd)
+    log_file <- file.path(tempdir(), "llamar-signal-mcp.log")
+
+    system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE,
+        stdout = log_file, stderr = log_file)
+
+    # Wait for startup
+    for (i in 1:20) {
+        Sys.sleep(0.25)
+        conn <- tryCatch(
+            socketConnection("localhost", port, open = "r+b", blocking = TRUE, timeout = 1),
+            error = function (e) NULL
+        )
+        if (!is.null(conn)) {
+            close(conn)
+            return(TRUE)
+        }
+    }
+
+    FALSE
+}
+
+# ============================================================================
+# Main bot loop
+# ============================================================================
+
+run_signal_bot <- function (opts) {
+    log_msg("Starting llamar Signal bot...")
+    log_msg("Account: ", opts$account)
+    log_msg("Daemon: ", opts$host, ":", opts$port)
+
+    # Create Signal transport
+    transport <- llamaR:::transport_signal(list(
+        host = opts$host,
+        port = opts$port,
+        account = opts$account,
+        allow_from = opts$allow_from
+    ))
+
+    # Check if daemon is running
+    if (!transport$check()) {
+        cat(sprintf("%sError: signal-cli daemon not running%s\n", color$magenta, color$reset))
+        cat("Start it with:\n")
+        cat(sprintf("  signal-cli -a %s daemon --http %s:%d\n",
+            opts$account, opts$host, opts$port))
+        return(invisible(NULL))
+    }
+    log_msg("Connected to signal-cli daemon")
+
+    # Start MCP server
+    log_msg("Starting MCP server on port ", opts$mcp_port, "...")
+    if (!start_mcp_server(opts$mcp_port)) {
+        cat(sprintf("%sError: Could not start MCP server%s\n", color$magenta, color$reset))
+        return(invisible(NULL))
+    }
+
+    # Connect to MCP
+    mcp_conn <- tryCatch(
+        mcp_connect(port = opts$mcp_port, name = "llamar-signal"),
+        error = function (e) {
+            cat(sprintf("%sError connecting to MCP: %s%s\n", color$magenta, e$message, color$reset))
+            NULL
+        }
+    )
+
+    if (is.null(mcp_conn)) return(invisible(NULL))
+    log_msg("MCP server connected, ", length(mcp_conn$tools), " tools available")
+
+    # Get tools and load context
+    tools <- mcp_tools_for_api(mcp_conn)
+    system_prompt <- llamaR:::load_context(getwd())
+
+    # Tool handler
+    tool_handler <- function (name, args) {
+        result <- tryCatch(
+            mcp_call(mcp_conn, name, args),
+            error = function (e) list(text = paste("Error:", e$message))
+        )
+        result$text %||% ""
+    }
+
+    # Per-sender conversation history
+    histories <- new.env(parent = emptyenv())
+
+    log_msg(color$green, "Bot ready. Waiting for messages...", color$reset)
+
+    # Main loop
+    while (TRUE) {
+        # Poll for messages
+        msgs <- tryCatch(
+            transport$receive(timeout = 5),
+            error = function (e) {
+                log_msg("Receive error: ", e$message)
+                list()
+            }
+        )
+
+        for (msg in msgs) {
+            log_msg(color$cyan, msg$sender, color$reset, ": ", msg$text)
+
+            # Send typing indicator
+            transport$send_typing(msg$sender, msg$metadata$group_id)
+
+            # Get or create history for this sender
+            sender_key <- msg$sender
+            if (is.null(histories[[sender_key]])) {
+                histories[[sender_key]] <- list()
+            }
+
+            # Call LLM with tools
+            result <- tryCatch({
+                agent(
+                    prompt = msg$text,
+                    tools = tools,
+                    tool_handler = tool_handler,
+                    system = system_prompt,
+                    model = opts$model,
+                    provider = opts$provider,
+                    history = histories[[sender_key]],
+                    verbose = TRUE
+                )
+            }, error = function (e) {
+                log_msg(color$magenta, "LLM error: ", e$message, color$reset)
+                list(content = paste("Sorry, I encountered an error:", e$message))
+            })
+
+            # Stop typing
+            transport$send_typing(msg$sender, msg$metadata$group_id, stop = TRUE)
+
+            # Update history
+            histories[[sender_key]] <- result$history
+
+            # Send response
+            response_msg <- llamaR:::message_normalize(
+                text = result$content,
+                sender = "assistant",
+                channel = "signal",
+                metadata = list(
+                    reply_to = msg$sender,
+                    group_id = msg$metadata$group_id
+                )
+            )
+
+            tryCatch({
+                transport$send(response_msg)
+                log_msg(color$green, "Sent response", color$reset)
+            }, error = function (e) {
+                log_msg(color$magenta, "Send error: ", e$message, color$reset)
+            })
+        }
+    }
+}
+
+# ============================================================================
+# Entry point
+# ============================================================================
+
+if (!interactive()) {
+    opts <- parse_args()
+    run_signal_bot(opts)
+}

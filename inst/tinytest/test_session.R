@@ -5,9 +5,9 @@ tmpdir <- tempfile("llamar_test_")
 dir.create(tmpdir)
 old_wd <- setwd(tmpdir)
 on.exit({
-  setwd(old_wd)
-  unlink(tmpdir, recursive = TRUE)
-}, add = TRUE)
+        setwd(old_wd)
+        unlink(tmpdir, recursive = TRUE)
+    }, add = TRUE)
 
 # Test session_id generates expected format
 id <- llamaR:::session_id()
@@ -52,7 +52,7 @@ expect_equal(length(session$messages), 2)
 expect_equal(session$messages[[2]]$role, "assistant")
 
 # Test session_list returns sessions
-llamaR:::session_save(session)  # Save with messages
+llamaR:::session_save(session) # Save with messages
 sessions <- llamaR:::session_list(tmpdir)
 expect_equal(length(sessions), 1)
 expect_equal(sessions[[1]]$id, session$id)
@@ -84,7 +84,7 @@ empty_formatted <- llamaR:::format_session_list(list())
 expect_true(grepl("No sessions found", empty_formatted))
 
 # Test multiple sessions are sorted by time
-Sys.sleep(0.1)  # Ensure different mtime
+Sys.sleep(0.1) # Ensure different mtime
 session2 <- llamaR:::session_new("anthropic", "claude-3", tmpdir)
 session2 <- llamaR:::session_add_message(session2, "user", "Test 2")
 llamaR:::session_save(session2)
@@ -94,3 +94,4 @@ expect_equal(length(sessions), 2)
 # Most recent should be first
 expect_equal(sessions[[1]]$id, session2$id)
 expect_equal(sessions[[2]]$id, session$id)
+

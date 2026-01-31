@@ -2,10 +2,10 @@
 
 # Test handle_request for initialize
 req <- list(
-  jsonrpc = "2.0",
-  id = 1,
-  method = "initialize",
-  params = list()
+    jsonrpc = "2.0",
+    id = 1,
+    method = "initialize",
+    params = list()
 )
 resp <- llamaR:::handle_request(req)
 
@@ -18,10 +18,10 @@ expect_equal(resp$result$serverInfo$name, "llamar-mcp")
 
 # Test handle_request for tools/list
 req <- list(
-  jsonrpc = "2.0",
-  id = 2,
-  method = "tools/list",
-  params = list()
+    jsonrpc = "2.0",
+    id = 2,
+    method = "tools/list",
+    params = list()
 )
 resp <- llamaR:::handle_request(req)
 
@@ -31,13 +31,13 @@ expect_true(length(resp$result$tools) > 0)
 
 # Test handle_request for tools/call
 req <- list(
-  jsonrpc = "2.0",
-  id = 3,
-  method = "tools/call",
-  params = list(
-    name = "run_r",
-    arguments = list(code = "2 + 2")
-  )
+    jsonrpc = "2.0",
+    id = 3,
+    method = "tools/call",
+    params = list(
+        name = "run_r",
+        arguments = list(code = "2 + 2")
+    )
 )
 resp <- llamaR:::handle_request(req)
 
@@ -47,21 +47,22 @@ expect_true(grepl("4", resp$result$content[[1]]$text))
 
 # Test handle_request for unknown method
 req <- list(
-  jsonrpc = "2.0",
-  id = 4,
-  method = "unknown/method",
-  params = list()
+    jsonrpc = "2.0",
+    id = 4,
+    method = "unknown/method",
+    params = list()
 )
 resp <- llamaR:::handle_request(req)
 
 expect_true("error" %in% names(resp))
-expect_equal(resp$error$code, -32601)
+expect_equal(resp$error$code, - 32601)
 
 # Test notifications return NULL
 req <- list(
-  jsonrpc = "2.0",
-  method = "notifications/initialized",
-  params = list()
+    jsonrpc = "2.0",
+    method = "notifications/initialized",
+    params = list()
 )
 resp <- llamaR:::handle_request(req)
 expect_null(resp)
+

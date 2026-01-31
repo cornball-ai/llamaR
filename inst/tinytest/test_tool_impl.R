@@ -55,3 +55,4 @@ expect_true(grepl("hello", result$content[[1]]$text))
 result <- llamaR:::tool_git_status(list(path = "."))
 # Just check it returns something
 expect_true(is.list(result))
+

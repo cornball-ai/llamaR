@@ -10,9 +10,17 @@ dir.create(testdir, recursive = TRUE)
 files <- llamaR:::list_context_files(testdir)
 expect_equal(length(files), 0)
 
-# Test load_context with no files
+# Test load_context with no project files
+# Note: May still contain global files from ~/.llamar/workspace/ if they exist
 ctx <- llamaR:::load_context(testdir)
-expect_null(ctx)
+workspace_dir <- llamaR:::get_workspace_dir()
+has_global_files <- any(file.exists(file.path(workspace_dir, llamaR:::global_context_files())))
+if (has_global_files) {
+    # Global files exist, so context won't be NULL
+    expect_true(is.character(ctx))
+} else {
+    expect_null(ctx)
+}
 
 # Create README.md (now in defaults)
 writeLines(c("# My Project", "", "This is the readme."), file.path(testdir, "README.md"))
@@ -68,3 +76,4 @@ expect_true(grepl("README.md", files[1]))
 
 # Cleanup
 unlink(testdir, recursive = TRUE)
+

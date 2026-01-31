@@ -21,7 +21,7 @@ expect_equal(config$context_files, defaults)
 # Create project config
 dir.create(file.path(testdir, ".llamar"), showWarnings = FALSE)
 writeLines('{"provider": "ollama", "model": "llama3.2"}',
-           file.path(testdir, ".llamar", "config.json"))
+    file.path(testdir, ".llamar", "config.json"))
 
 # Test project config is loaded
 config <- llamaR:::load_config(testdir)
@@ -30,7 +30,7 @@ expect_equal(config$model, "llama3.2")
 
 # Test custom context_files
 writeLines('{"context_files": ["README.md", "CUSTOM.md"]}',
-           file.path(testdir, ".llamar", "config.json"))
+    file.path(testdir, ".llamar", "config.json"))
 
 config <- llamaR:::load_config(testdir)
 expect_equal(config$context_files, c("README.md", "CUSTOM.md"))
@@ -42,7 +42,8 @@ expect_equal(files, c("README.md", "CUSTOM.md"))
 # Test invalid JSON is handled gracefully
 writeLines('not valid json', file.path(testdir, ".llamar", "config.json"))
 config <- llamaR:::load_config(testdir)
-expect_equal(config$context_files, defaults)  # Falls back to defaults
+expect_equal(config$context_files, defaults) # Falls back to defaults
 
 # Cleanup
 unlink(testdir, recursive = TRUE)
+

@@ -38,6 +38,27 @@ llamar --list
 llamar --provider ollama --model llama3.2
 ```
 
+## Signal Bot
+
+llamaR can run as a Signal bot using signal-cli:
+
+```bash
+# 1. Install signal-cli (requires Java)
+# 2. Link your Signal account
+signal-cli link -n "llamar"
+
+# 3. Start the daemon
+signal-cli -a +15551234567 daemon --http 127.0.0.1:8080
+
+# 4. Run the bot
+llamar-signal --account +15551234567
+
+# With allowlist (only respond to specific numbers)
+llamar-signal --account +15551234567 --allow +15557654321,+15559876543
+```
+
+The bot responds to messages with the same tools available in the terminal REPL.
+
 ## Architecture
 
 ```
