@@ -389,6 +389,40 @@ do_compact <- function(session, provider, model, system_prompt) {
 
 
 # ============================================================================
+# Tool output buffer (for /last command)
+# ============================================================================
+
+# Store last N tool outputs
+.tool_buffer <- new.env(parent = emptyenv())
+.tool_buffer$outputs <- list()
+.tool_buffer$max_size <- 20L
+
+tool_buffer_add <- function(name, args, result) {
+  entry <- list(
+    name = name,
+    args = args,
+    result = result,
+    time = Sys.time()
+  )
+  .tool_buffer$outputs <- c(list(entry), .tool_buffer$outputs)
+  # Trim to max size
+  if (length(.tool_buffer$outputs) > .tool_buffer$max_size) {
+    .tool_buffer$outputs <- .tool_buffer$outputs[1:.tool_buffer$max_size]
+  }
+}
+
+tool_buffer_get <- function(n = 1) {
+  if (n > length(.tool_buffer$outputs)) {
+    return(NULL)
+  }
+  .tool_buffer$outputs[[n]]
+}
+
+tool_buffer_list <- function() {
+  .tool_buffer$outputs
+}
+
+# ============================================================================
 # Tool approval system
 # ============================================================================
 
@@ -606,6 +640,8 @@ run_agent <- function(opts) {
     if (!failed) {
       lines <- length(strsplit(text, "\n")[[1]])
       cat(sprintf("%s(%d lines)%s\n", color$dim, lines, color$reset))
+      # Store in buffer for /last command
+      tool_buffer_add(name, args, text)
     }
     text
   }
@@ -752,6 +788,50 @@ run_agent <- function(opts) {
         # Reload context to pick up new memory
         system_prompt <- llamaR:::load_context(cwd)
         next
+      } else if (cmd == "/last") {
+        # /last [N] - show tool output (default: most recent)
+        n <- if (!is.null(cmd_arg)) as.integer(cmd_arg) else 1L
+        outputs <- tool_buffer_list()
+
+        if (length(outputs) == 0) {
+          cat(sprintf("%sNo tool outputs yet.%s\n", color$dim, color$reset))
+          next
+        }
+
+        if (n < 1 || n > length(outputs)) {
+          cat(sprintf("%sInvalid index. Have %d outputs.%s\n", color$yellow, length(outputs), color$reset))
+          next
+        }
+
+        entry <- outputs[[n]]
+        cat(sprintf("\n%s%s%s @ %s\n", color$cyan, entry$name, color$reset,
+                    format(entry$time, "%H:%M:%S")))
+        if (length(entry$args) > 0) {
+          cat(sprintf("%sArgs: %s%s\n", color$dim,
+                      jsonlite::toJSON(entry$args, auto_unbox = TRUE), color$reset))
+        }
+        cat(sprintf("%s%s%s\n", color$dim, strrep("-", 40), color$reset))
+        cat(entry$result)
+        cat("\n")
+        next
+      } else if (cmd == "/outputs") {
+        # List recent tool outputs
+        outputs <- tool_buffer_list()
+        if (length(outputs) == 0) {
+          cat(sprintf("%sNo tool outputs yet.%s\n", color$dim, color$reset))
+        } else {
+          cat(sprintf("\n%sRecent tool outputs:%s\n", color$bold, color$reset))
+          for (i in seq_along(outputs)) {
+            entry <- outputs[[i]]
+            lines <- length(strsplit(entry$result, "\n")[[1]])
+            cat(sprintf("  %s[%d]%s %s%s%s (%d lines) @ %s\n",
+                        color$dim, i, color$reset,
+                        color$cyan, entry$name, color$reset,
+                        lines, format(entry$time, "%H:%M:%S")))
+          }
+          cat(sprintf("\n%sUse /last [N] to view output%s\n", color$dim, color$reset))
+        }
+        next
       } else if (cmd == "/help") {
         cat("
 Commands:
@@ -765,6 +845,8 @@ Commands:
   /provider <p>  Switch provider (anthropic, openai, ollama)
   /remember <f>  Remember a fact (project-local)
   /remember --global <f>  Remember a fact (global)
+  /last [N]      Show tool output (1=most recent)
+  /outputs       List recent tool outputs
   /help          Show this help
 
 ")
