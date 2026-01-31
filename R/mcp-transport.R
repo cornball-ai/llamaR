@@ -58,7 +58,10 @@ run_socket <- function (port) {
         log_msg("Client connected")
 
         send_fn <- function(json) {
-            writeLines(json, client)
+            tryCatch(
+                writeLines(json, client),
+                error = function(e) log_msg("Send error:", e$message)
+            )
         }
 
         # Handle client requests

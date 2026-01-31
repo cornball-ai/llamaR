@@ -10,22 +10,27 @@ handle_request <- function (req) {
     id <- req$id
     params <- req$params %||% list()
 
-    result <- switch(method,
-        "initialize" = list(
-            protocolVersion = "2024-11-05",
-            capabilities = list(tools = list()),
-            serverInfo = list(name = "llamar-mcp", version = as.character(packageVersion("llamaR")))
-        ),
+    result <- tryCatch({
+        switch(method,
+            "initialize" = list(
+                protocolVersion = "2024-11-05",
+                capabilities = list(tools = list()),
+                serverInfo = list(name = "llamar-mcp", version = as.character(packageVersion("llamaR")))
+            ),
 
-        "notifications/initialized" = NULL, # No response for notifications
+            "notifications/initialized" = NULL, # No response for notifications
 
-        "tools/list" = list(tools = get_tools(getOption("llamar.tools"))),
+            "tools/list" = list(tools = get_tools(getOption("llamar.tools"))),
 
-        "tools/call" = call_tool(params$name, params$arguments),
+            "tools/call" = call_tool(params$name, params$arguments),
 
-        # Default: method not found
-        list(.error = list(code = - 32601, message = paste("Method not found:", method)))
-    )
+            # Default: method not found
+            list(.error = list(code = -32601, message = paste("Method not found:", method)))
+        )
+    }, error = function(e) {
+        log_error(e$message, error_type = "handler_error", method = method)
+        err(paste("Internal error:", e$message))
+    })
 
     # Notifications don't get responses
     if (is.null(result)) return(NULL)
@@ -63,8 +68,12 @@ process_request <- function (line, send_fn) {
     # Handle and respond
     response <- handle_request(req)
     if (!is.null(response)) {
-        json <- jsonlite::toJSON(response, auto_unbox = TRUE, null = "null")
-        send_fn(json)
+        tryCatch({
+            json <- jsonlite::toJSON(response, auto_unbox = TRUE, null = "null")
+            send_fn(json)
+        }, error = function(e) {
+            log_error(e$message, error_type = "send_error", method = req$method)
+        })
     }
 
     TRUE

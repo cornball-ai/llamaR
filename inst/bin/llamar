@@ -139,11 +139,14 @@ start_server <- function(port, tools = NULL) {
   } else ""
   cmd <- sprintf('llamaR::serve(port = %d, cwd = "%s"%s)', port, cwd, tools_arg)
 
+  # Log server output for debugging
+  log_file <- file.path(tempdir(), "llamar-server.log")
+
   if (.Platform$OS.type == "windows") {
-    system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE, stdout = FALSE, stderr = FALSE)
+    system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE, stdout = log_file, stderr = log_file)
   } else {
     system2("Rscript", c("-e", shQuote(cmd)), wait = FALSE,
-            stdout = "/dev/null", stderr = "/dev/null")
+            stdout = log_file, stderr = log_file)
   }
 
   # Wait for startup
@@ -428,18 +431,23 @@ ask_approval <- function(name, args) {
   cat(sprintf("\n%s%s wants to execute:%s\n", color$yellow, name, color$reset))
   print_tool(name, args)
 
-  # Use bash read for prompt
+  # Show numbered options
+  cat(sprintf("%s1) allow once  2) allow always  3) deny%s\n", color$dim, color$reset))
+
+  # Use bash read -e for readline support
   response <- system(
-    sprintf('read -p "%s[a]llow once, [A]llow always, [d]eny: %s" r && echo "$r"',
-            color$yellow, color$reset),
+    sprintf('bash -c \'read -e -p "%sChoice [1]: %s" r && echo "$r"\'', color$yellow, color$reset),
     intern = TRUE
   )
-
   if (length(response) == 0) response <- ""
+  response <- trimws(response)
+
+  # Default to "1" (allow once) if empty
+  if (response == "") response <- "1"
 
   list(
-    approved = tolower(response) %in% c("a", "allow", "y", "yes", ""),
-    always = response == "A" || response == "Allow"
+    approved = response %in% c("1", "2"),
+    always = response == "2"
   )
 }
 
@@ -490,7 +498,9 @@ run_agent <- function(opts) {
   print_banner(session$id)
 
   # Start/connect to MCP server
+  server_log <- file.path(tempdir(), "llamar-server.log")
   cat(sprintf("%sStarting MCP server on port %d...%s\n", color$dim, opts$port, color$reset))
+  cat(sprintf("%sServer log: %s%s\n", color$dim, server_log, color$reset))
 
   if (!start_server(opts$port, opts$tools)) {
     cat(sprintf("%sError: Could not start MCP server%s\n", color$bright_magenta, color$reset))
@@ -561,16 +571,41 @@ run_agent <- function(opts) {
       return("Tool execution denied by configuration")
     }
 
-    print_tool(name, args)
+    # Brief indicator for tool execution
+    cat(sprintf("%s%s...%s ", color$dim, name, color$reset))
+
+    failed <- FALSE
     result <- tryCatch({
       mcp_call(conn, name, args)
     }, error = function(e) {
-      cat(sprintf("%sTool error: %s%s\n", color$bright_magenta, e$message, color$reset))
+      # Try to reconnect on connection errors
+      if (grepl("closed connection|SIGPIPE", e$message)) {
+        cat(sprintf("%sreconnecting...%s ", color$dim, color$reset))
+        conn <<- tryCatch(
+          mcp_connect(port = opts$port, name = "llamar"),
+          error = function(e2) NULL
+        )
+        if (!is.null(conn)) {
+          # Retry the call
+          return(tryCatch(
+            mcp_call(conn, name, args),
+            error = function(e2) {
+              failed <<- TRUE
+              cat(sprintf("%sfailed: %s%s\n", color$bright_magenta, e2$message, color$reset))
+              list(text = paste("Error:", e2$message))
+            }
+          ))
+        }
+      }
+      failed <<- TRUE
+      cat(sprintf("%sfailed: %s%s\n", color$bright_magenta, e$message, color$reset))
       list(text = paste("Error:", e$message))
     })
+
     text <- result$text %||% ""
-    if (nchar(text) > 0) {
-      print_result(text)
+    if (!failed) {
+      lines <- length(strsplit(text, "\n")[[1]])
+      cat(sprintf("%s(%d lines)%s\n", color$dim, lines, color$reset))
     }
     text
   }
@@ -604,9 +639,9 @@ run_agent <- function(opts) {
 
   # REPL
   while (TRUE) {
-    # Read input via bash read
+    # Read input - use bash read -e for readline support
     prompt <- system(
-      sprintf('read -p "%s>%s " line && echo "$line"', color$green, color$reset),
+      sprintf('bash -c \'read -e -p "%s> %s" line && echo "$line"\'', color$green, color$reset),
       intern = TRUE
     )
 
@@ -761,6 +796,11 @@ Commands:
       }
     }
 
+    # Strip extra fields from messages for API (only role + content)
+    api_history <- lapply(session$messages, function(m) {
+      list(role = m$role, content = m$content)
+    })
+
     result <- tryCatch({
       agent(
         prompt = prompt,
@@ -769,6 +809,7 @@ Commands:
         system = system_prompt,
         model = model,
         provider = provider,
+        history = api_history,
         verbose = FALSE  # We handle display ourselves
       )
     }, error = function(e) {

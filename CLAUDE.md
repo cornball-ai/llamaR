@@ -171,6 +171,35 @@ r -e 'fyi::use_fyi_md("llamaR", docs = TRUE)'
 r -e 'tinytest::test_package("llamaR")'
 ```
 
+## Coding Conventions
+
+### Prefer system2() over system()
+
+Use `system2()` for shell commands - it gives better control over stdout/stderr:
+```r
+# Good
+system2("git", c("status", "--short"), stdout = TRUE)
+
+# Avoid
+system("git status --short", intern = TRUE)
+```
+
+### Shell commands need explicit bash
+
+When using bash-specific features (like `read -e`), explicitly call bash since `/bin/sh` is dash on Ubuntu:
+```r
+system('bash -c "read -e -p \"> \" input && echo $input"', intern = TRUE)
+```
+
+## Connection Handling
+
+The CLI automatically reconnects if the MCP server connection drops mid-session. When a tool call fails with "closed connection", it will:
+1. Attempt to reconnect to the server
+2. Retry the failed tool call
+3. Continue the conversation
+
+This handles transient socket issues without losing the session.
+
 ## Known Issues
 
 ### littler doesn't pass CLI args
