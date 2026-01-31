@@ -169,7 +169,7 @@ clear_skills <- function () {
 #' @param pattern File pattern to match (default "*.R")
 #' @return Character vector of loaded file names (invisible)
 #' @noRd
-load_skills <- function(path, pattern = "*.R") {
+load_skills <- function (path, pattern = "*.R") {
     path <- path.expand(path)
     if (!dir.exists(path)) {
         return(invisible(character()))
@@ -187,7 +187,7 @@ load_skills <- function(path, pattern = "*.R") {
     for (f in files) {
         tryCatch(
             source(f, local = skill_env),
-            error = function(e) {
+            error = function (e) {
                 warning(sprintf("Failed to load skill from %s: %s", f, e$message))
             }
         )
@@ -224,7 +224,7 @@ skills_as_tools <- function () {
 #' @param timeout Timeout in seconds
 #' @return Result from skill handler
 #' @noRd
-call_skill <- function(name, args, ctx = list(), timeout = 30L) {
+call_skill <- function (name, args, ctx = list(), timeout = 30L) {
     skill <- get_skill(name)
     if (is.null(skill)) {
         return(err(paste("Unknown skill:", name)))
@@ -242,7 +242,7 @@ call_skill <- function(name, args, ctx = list(), timeout = 30L) {
 #' @param path Path to SKILL.md file
 #' @return List with name, description, metadata, and body
 #' @noRd
-parse_skill_md <- function(path) {
+parse_skill_md <- function (path) {
     if (!file.exists(path)) {
         return(NULL)
     }
@@ -258,32 +258,32 @@ parse_skill_md <- function(path) {
         body <- paste(lines, collapse = "\n")
         body <- gsub("\\{baseDir\\}", dirname(path), body)
         return(list(
-            name = tools::file_path_sans_ext(basename(dirname(path))),
-            description = "",
-            metadata = list(),
-            body = body,
-            path = path
-        ))
+                name = tools::file_path_sans_ext(basename(dirname(path))),
+                description = "",
+                metadata = list(),
+                body = body,
+                path = path
+            ))
     }
 
     # Find end of frontmatter
-    end_idx <- which(grepl("^---\\s*$", lines[-1]))[1] + 1
+    end_idx <- which(grepl("^---\\s*$", lines[- 1]))[1] + 1
     if (is.na(end_idx)) {
         # No closing ---, treat as no frontmatter
         body <- paste(lines, collapse = "\n")
         body <- gsub("\\{baseDir\\}", dirname(path), body)
         return(list(
-            name = tools::file_path_sans_ext(basename(dirname(path))),
-            description = "",
-            metadata = list(),
-            body = body,
-            path = path
-        ))
+                name = tools::file_path_sans_ext(basename(dirname(path))),
+                description = "",
+                metadata = list(),
+                body = body,
+                path = path
+            ))
     }
 
     # Extract frontmatter and body
     frontmatter_lines <- lines[2:(end_idx - 1)]
-    body_lines <- if (end_idx < length(lines)) lines[(end_idx + 1):length(lines)] else character()
+    body_lines <- if (end_idx < length(lines)) lines[(end_idx + 1) :length(lines)] else character()
 
     # Parse YAML frontmatter (simple key: value parsing)
     frontmatter <- parse_yaml_simple(frontmatter_lines)
@@ -309,7 +309,7 @@ parse_skill_md <- function(path) {
 #' @param lines Character vector of YAML lines
 #' @return Named list
 #' @noRd
-parse_yaml_simple <- function(lines) {
+parse_yaml_simple <- function (lines) {
     result <- list()
 
     for (line in lines) {
@@ -317,7 +317,7 @@ parse_yaml_simple <- function(lines) {
         if (grepl("^\\s*$", line) || grepl("^\\s*#", line)) next
 
         # Match key: value
-        match <- regmatches(line, regexec("^([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$", line))[[1]]
+        match <- regmatches(line, regexec("^([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$", line)) [[1]]
         if (length(match) == 3) {
             key <- match[2]
             value <- match[3]
@@ -329,7 +329,7 @@ parse_yaml_simple <- function(lines) {
             if (key == "metadata" && grepl("^\\{", value)) {
                 result[[key]] <- tryCatch(
                     jsonlite::fromJSON(value, simplifyVector = FALSE),
-                    error = function(e) list()
+                    error = function (e) list()
                 )
             } else {
                 result[[key]] <- value

@@ -90,15 +90,25 @@ inst/
 | `.llamar/sessions/` | Project-local session storage |
 | `.llamar/config.json` | Project config (provider, model, context_files) |
 | `~/.llamar/config.json` | Global config defaults |
+| `~/.llamar/workspace/` | Agent workspace (matches openclaw) |
+| `~/.llamar/workspace/SOUL.md` | Agent personality (who the agent is) |
+| `~/.llamar/workspace/USER.md` | User preferences (who you are) |
+| `~/.llamar/workspace/MEMORY.md` | Global long-term memory |
 | `AGENTS.md` | Project-specific agent instructions |
 
 ## Context Files (Auto-loaded)
 
-Default files loaded into system prompt (configurable via config):
+**Global files** (from `~/.llamar/workspace/`, loaded first):
+- `SOUL.md` - Agent personality, values, style
+- `USER.md` - User preferences, context about you
+- `MEMORY.md` - Long-term memory across projects
+
+**Project files** (configurable via config):
 - `README.md` - Project description
 - `PLAN.md` - Development roadmap
 - `fyi.md` - Package introspection (from fyi package)
 - `AGENTS.md` - Behavior guidelines
+- `MEMORY.md` - Project-specific memory
 
 ## Environment Variables
 

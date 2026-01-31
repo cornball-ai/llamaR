@@ -9,7 +9,7 @@
 #' @param cwd Working directory to search
 #' @return Character string with assembled context, or NULL if no files found
 #' @noRd
-load_context <- function(cwd = getwd()) {
+load_context <- function (cwd = getwd()) {
     # Get file list from config (or defaults)
     file_names <- get_context_files(cwd)
 
@@ -24,12 +24,22 @@ load_context <- function(cwd = getwd()) {
         ""
     )
 
-    # Load global memory first (~/.llamar/MEMORY.md)
-    global_memory <- path.expand("~/.llamar/MEMORY.md")
-    if (file.exists(global_memory)) {
-        content <- paste(readLines(global_memory, warn = FALSE), collapse = "\n")
-        if (nchar(trimws(content)) > 0) {
-            parts <- c(parts, "## User Memory (Global)", "", content, "")
+    # Load global context files from ~/.llamar/workspace/ (SOUL.md, USER.md, MEMORY.md)
+    workspace_dir <- get_workspace_dir()
+    global_files <- global_context_files()
+    global_labels <- c(
+        "SOUL.md" = "Agent Identity (Global)",
+        "USER.md" = "User Preferences (Global)",
+        "MEMORY.md" = "User Memory (Global)"
+    )
+    for (gf in global_files) {
+        global_path <- file.path(workspace_dir, gf)
+        if (file.exists(global_path)) {
+            content <- paste(readLines(global_path, warn = FALSE), collapse = "\n")
+            if (nchar(trimws(content)) > 0) {
+                label <- global_labels[[gf]] %||% gf
+                parts <- c(parts, sprintf("## %s", label), "", content, "")
+            }
         }
     }
 

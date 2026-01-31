@@ -7,6 +7,18 @@ default_context_files <- function () {
     c("README.md", "PLAN.md", "fyi.md", "AGENTS.md", "MEMORY.md")
 }
 
+#' Global context files loaded from ~/.llamar/workspace/
+#' @noRd
+global_context_files <- function () {
+    c("SOUL.md", "USER.md", "MEMORY.md")
+}
+
+#' Get workspace directory path
+#' @noRd
+get_workspace_dir <- function () {
+    path.expand("~/.llamar/workspace")
+}
+
 #' Load configuration from JSON file
 #'
 #' @param path Path to config file
