@@ -75,6 +75,107 @@ JSON/JSON5 with hierarchical overrides:
 .llamar/config.json        # Project overrides
 ```
 
+## Channels (Signal, Discord, etc.)
+
+### Signal Config Comparison
+
+**openclaw** (`~/.openclaw/openclaw.json`):
+```json5
+{
+  channels: {
+    signal: {
+      enabled: true,
+      account: "+15551234567",
+      cliPath: "signal-cli",
+      httpHost: "127.0.0.1",
+      httpPort: 8080,
+      httpUrl: "http://127.0.0.1:8080",  // overrides host/port
+      autoStart: true,
+      dmPolicy: "pairing",  // pairing | allowlist | open | disabled
+      allowFrom: ["+15557654321"],
+      groupPolicy: "allowlist",
+      // Multi-account support
+      accounts: {
+        "work": { account: "+15559999999", allowFrom: ["*"] }
+      }
+    }
+  }
+}
+```
+
+**llamaR** (`~/.llamar/config.json`):
+```json
+{
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "account": "+15551234567",
+      "httpHost": "127.0.0.1",
+      "httpPort": 8080,
+      "httpUrl": "http://127.0.0.1:8080",
+      "allowFrom": ["+15557654321"]
+    }
+  }
+}
+```
+
+Config structure now matches openclaw.
+
+### Feature Parity
+
+| Feature | openclaw | llamaR | Notes |
+|---------|----------|--------|-------|
+| Basic send/receive | ✅ | ✅ | |
+| Typing indicators | ✅ | ✅ | |
+| Per-sender history | ✅ | ✅ | |
+| Allowlist | ✅ | ✅ | |
+| Multi-account | ✅ | ❌ | Low priority |
+| Pairing codes | ✅ | ❌ | Medium priority |
+| Group support | ✅ | ⚠️ Partial | |
+| Auto-spawn daemon | ✅ | ❌ | |
+| Read receipts | ✅ | ❌ | |
+| Reactions | ✅ | ❌ | |
+| Message chunking | ✅ | ❌ | Medium priority |
+| Attachments | ✅ | ❌ | Medium priority |
+
+### Running Modes
+
+| Mode | openclaw | llamaR |
+|------|----------|--------|
+| Integrated gateway | ✅ Gateway daemon | ❌ |
+| Standalone bot | ❌ | ✅ `llamar-signal` |
+| Terminal REPL | ✅ `openclaw chat` | ✅ `llamar` |
+
+### TODO for Signal Parity
+
+**High:**
+- ~~Move config under `channels.signal.*`~~ ✅ Done
+- ~~Add `httpUrl` as alternative to `httpHost`/`httpPort`~~ ✅ Done
+- Message chunking for long responses
+
+**Medium:**
+- Pairing code flow
+- Group message handling
+- Attachment support
+
+**Low:**
+- Multi-account
+- Auto-spawn daemon
+- Reactions
+
+## Workspace Files
+
+| File | Purpose | llamaR Status |
+|------|---------|---------------|
+| `SOUL.md` | Agent personality | ✅ |
+| `USER.md` | User preferences | ✅ |
+| `MEMORY.md` | Long-term memory | ✅ |
+| `AGENTS.md` | Operating instructions | ✅ |
+| `memory/YYYY-MM-DD.md` | Daily logs | ❌ Planned |
+| `IDENTITY.md` | Agent name/emoji | ❌ |
+| `TOOLS.md` | Tool notes | ❌ |
+| `HEARTBEAT.md` | Proactive checklist | ❌ |
+
 ## What Differs
 
 ### Stateful R

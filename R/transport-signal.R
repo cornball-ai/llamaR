@@ -6,19 +6,28 @@
 #' Requires signal-cli running in daemon mode:
 #'   signal-cli -a +1234567890 daemon --http 127.0.0.1:8080
 #'
-#' @param config List with:
-#'   - host: Daemon host (default: "127.0.0.1")
-#'   - port: Daemon port (default: 8080)
+#' @param config List with (matches openclaw channels.signal.*):
+#'   - httpHost: Daemon host (default: "127.0.0.1")
+#'   - httpPort: Daemon port (default: 8080)
+#'   - httpUrl: Full URL (overrides httpHost/httpPort)
 #'   - account: Signal account phone number (required)
-#'   - allow_from: Vector of allowed sender numbers (optional)
+#'   - allowFrom: Vector of allowed sender numbers (optional)
 #' @return Transport object
 #' @noRd
 transport_signal <- function (config = list()) {
-    host <- config$host %||% "127.0.0.1"
-    port <- config$port %||% 8080L
+    # Resolve base URL (httpUrl overrides httpHost/httpPort)
+    if (!is.null(config$httpUrl) && nchar(trimws(config$httpUrl)) > 0) {
+        base_url <- trimws(config$httpUrl)
+        # Remove trailing slash
+        base_url <- sub("/+$", "", base_url)
+    } else {
+        host <- config$httpHost %||% "127.0.0.1"
+        port <- config$httpPort %||% 8080L
+        base_url <- sprintf("http://%s:%d", host, port)
+    }
+
     account <- config$account
-    allow_from <- config$allow_from %||% character()
-    base_url <- sprintf("http://%s:%d", host, port)
+    allow_from <- config$allowFrom %||% character()
 
     if (is.null(account)) {
         stop("Signal transport requires 'account' (phone number)", call. = FALSE)

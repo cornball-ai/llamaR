@@ -33,9 +33,10 @@ parse_args <- function () {
 
     opts <- list(
         account = NULL,
-        host = "127.0.0.1",
-        port = 8080L,
-        allow_from = character(),
+        httpHost = "127.0.0.1",
+        httpPort = 8080L,
+        httpUrl = NULL,
+        allowFrom = character(),
         provider = "anthropic",
         model = NULL,
         mcp_port = 7850L
@@ -48,13 +49,16 @@ parse_args <- function () {
             opts$account <- args[i + 1]
             i <- i + 2
         } else if (arg == "--host" && i < length(args)) {
-            opts$host <- args[i + 1]
+            opts$httpHost <- args[i + 1]
             i <- i + 2
         } else if (arg == "--port" && i < length(args)) {
-            opts$port <- as.integer(args[i + 1])
+            opts$httpPort <- as.integer(args[i + 1])
+            i <- i + 2
+        } else if (arg == "--url" && i < length(args)) {
+            opts$httpUrl <- args[i + 1]
             i <- i + 2
         } else if (arg == "--allow" && i < length(args)) {
-            opts$allow_from <- strsplit(args[i + 1], ",")[[1]]
+            opts$allowFrom <- strsplit(args[i + 1], ",")[[1]]
             i <- i + 2
         } else if (arg == "--provider" && i < length(args)) {
             opts$provider <- args[i + 1]
@@ -72,6 +76,7 @@ Options:
   --account    Signal phone number (required)
   --host       signal-cli daemon host (default: 127.0.0.1)
   --port       signal-cli daemon port (default: 8080)
+  --url        signal-cli daemon URL (overrides --host/--port)
   --allow      Comma-separated allowed sender numbers
   --provider   LLM provider: anthropic, openai, ollama
   --model      Model name
@@ -84,6 +89,20 @@ Prerequisites:
      signal-cli -a +15551234567 daemon --http 127.0.0.1:8080
   4. Run this bot:
      llamar-signal --account +15551234567
+
+Config (matches openclaw channels.signal.*):
+  ~/.llamar/config.json:
+  {
+    \"channels\": {
+      \"signal\": {
+        \"enabled\": true,
+        \"account\": \"+15551234567\",
+        \"httpHost\": \"127.0.0.1\",
+        \"httpPort\": 8080,
+        \"allowFrom\": [\"+15557654321\"]
+      }
+    }
+  }
 
 ")
             quit(save = "no", status = 0)
@@ -166,14 +185,16 @@ start_mcp_server <- function (port) {
 run_signal_bot <- function (opts) {
     log_msg("Starting llamar Signal bot...")
     log_msg("Account: ", opts$account)
-    log_msg("Daemon: ", opts$host, ":", opts$port)
+    daemon_url <- if (!is.null(opts$httpUrl)) opts$httpUrl else sprintf("%s:%d", opts$httpHost, opts$httpPort)
+    log_msg("Daemon: ", daemon_url)
 
-    # Create Signal transport
+    # Create Signal transport (config matches openclaw channels.signal.*)
     transport <- llamaR:::transport_signal(list(
-        host = opts$host,
-        port = opts$port,
+        httpHost = opts$httpHost,
+        httpPort = opts$httpPort,
+        httpUrl = opts$httpUrl,
         account = opts$account,
-        allow_from = opts$allow_from
+        allowFrom = opts$allowFrom
     ))
 
     # Check if daemon is running

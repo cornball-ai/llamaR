@@ -106,21 +106,30 @@ load_config <- function (cwd = getwd()) {
         config$skill_timeout <- 30L
     }
 
-    # Signal transport config
-    if (is.null(config$signal)) {
-        config$signal <- list()
+    # Channels config (matches openclaw structure)
+    if (is.null(config$channels)) {
+        config$channels <- list()
     }
-    if (is.null(config$signal$enabled)) {
-        config$signal$enabled <- FALSE
+
+    # Signal channel config (channels.signal.*)
+    if (is.null(config$channels$signal)) {
+        config$channels$signal <- list()
     }
-    if (is.null(config$signal$host)) {
-        config$signal$host <- "127.0.0.1"
+    sig <- config$channels$signal
+    if (is.null(sig$enabled)) {
+        sig$enabled <- FALSE
     }
-    if (is.null(config$signal$port)) {
-        config$signal$port <- 8080L
+    if (is.null(sig$httpHost)) {
+        sig$httpHost <- "127.0.0.1"
     }
-    # config$signal$account - required, no default
-    # config$signal$allow_from - optional allowlist
+    if (is.null(sig$httpPort)) {
+        sig$httpPort <- 8080L
+    }
+    # sig$httpUrl - optional, overrides httpHost/httpPort
+    # sig$account - required, no default
+    # sig$allowFrom - optional allowlist (E.164 numbers)
+    # sig$cliPath - optional path to signal-cli
+    config$channels$signal <- sig
 
     config
 }
