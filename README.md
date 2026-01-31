@@ -22,7 +22,7 @@ The same power as [moltbot](https://github.com/moltbot/moltbot) or [Claude Code]
 - **Readable** — R users can inspect exactly what the agent does
 - **Extensible** — add tools by writing R functions
 - **Tinyverse** — minimize dependencies, maximize stability
-- **MCP-native** — skills are portable, not locked in
+- **Isomorphic** — skills work in llamaR *and* [openclaw](https://github.com/mariozechner/openclaw)
 
 -----
 
@@ -90,6 +90,66 @@ Plus any tools from connected MCP servers.
 ### Web Search
 
 Web search is powered by [Tavily](https://tavily.com), an AI-native search engine with a free tier. Set `TAVILY_API_KEY` in `~/.Renviron` to enable.
+
+-----
+
+## Skills
+
+Skills are portable agent extensions—Markdown files that teach the LLM how to use shell commands.
+
+```markdown
+---
+name: weather
+description: Get current weather (no API key required)
+---
+
+# Weather
+
+```bash
+curl -s "wttr.in/London?format=3"
+```
+```
+
+Drop a `SKILL.md` file in `~/.llamar/skills/weather/` and it's immediately available.
+
+### Isomorphic with openclaw
+
+llamaR uses the same skill format as [openclaw](https://github.com/mariozechner/openclaw). Skills are portable between R (llamaR) and TypeScript (openclaw) agent runtimes.
+
+```bash
+# Use openclaw skills in llamaR
+ln -s ~/.openclaw/skills ~/.llamar/skills
+```
+
+**Why this matters:**
+
+- **Write once, run anywhere** — same skill works in both systems
+- **No lock-in** — skills are Markdown, not code
+- **Ecosystem access** — R users get the openclaw skill library
+- **Community leverage** — contributions benefit both communities
+
+See [docs/isomorphism.md](docs/isomorphism.md) for our full interoperability approach.
+
+### R Skills
+
+R runs from shell via [littler](https://github.com/eddelbuettel/littler) (`r`) or `Rscript`:
+
+```markdown
+---
+name: r-eval
+description: Execute R code
+---
+
+# R Evaluation
+
+```bash
+r -e 'summary(lm(mpg ~ wt, mtcars))'
+```
+```
+
+Shell-based R is **stateless**—each call is a fresh session. For **stateful** R (persistent variables across calls), use llamaR's built-in `run_r` tool. openclaw users can access stateful R by connecting to llamaR as an MCP server.
+
+See [docs/skills.md](docs/skills.md) for the full specification.
 
 -----
 

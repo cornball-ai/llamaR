@@ -2,6 +2,26 @@
 
 A CLI-first AI agent runtime for R. Self-hosted, model-agnostic, tinyverse.
 
+**Reference:** ~/openclaw - TypeScript CLI agent we're interoperable with.
+
+## Isomorphism with openclaw
+
+llamaR aims to be interoperable with openclaw on front-end matters:
+
+| Component | Approach |
+|-----------|----------|
+| Skills | Same SKILL.md format, same loading |
+| Sessions | JSONL transcripts + JSON metadata (planned) |
+| Memory | Daily markdown logs + MEMORY.md (planned) |
+| Config | JSON with hierarchical overrides |
+
+**Guidelines:**
+1. If it can be a SKILL.md, make it a skill (portable)
+2. If openclaw has a format, match it
+3. R-specific features (stateful `run_r`) stay in llamaR, exposed via MCP
+
+See `docs/isomorphism.md` for full details.
+
 ## Quick Start
 
 ```bash
@@ -47,12 +67,14 @@ User (terminal)
 R/
 ├── config.R        # Config file loading (~/.llamar/config.json, .llamar/config.json)
 ├── context.R       # Context file loading (README.md, PLAN.md, fyi.md, etc.)
+├── log.R           # Structured JSON logging
 ├── session.R       # Session persistence (.llamar/sessions/*.json)
+├── skill.R         # Skill system (SKILL.md parsing, registry)
 ├── mcp-handler.R   # JSON-RPC request handling
 ├── mcp-transport.R # Stdio and socket transports
 ├── serve.R         # Main serve() export
 ├── tools.R         # Tool definitions (MCP schema)
-├── tool-impl.R     # Tool implementations
+├── tool-impl.R     # Tool implementations + built-in skill registration
 ├── install-cli.R   # CLI installer (install_cli/uninstall_cli)
 └── utils.R         # Helpers (ok/err/log_msg)
 

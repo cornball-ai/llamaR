@@ -386,6 +386,64 @@ do_compact <- function(session, provider, model, system_prompt) {
 
 
 # ============================================================================
+# Tool approval system
+# ============================================================================
+
+# Check if a tool requires approval
+requires_approval <- function(tool_name, dangerous_tools) {
+  tool_name %in% dangerous_tools
+}
+
+# Load approvals from project-local file
+load_approvals <- function(cwd) {
+  path <- file.path(cwd, ".llamar", "approvals.json")
+  if (file.exists(path)) {
+    tryCatch(
+      jsonlite::fromJSON(path, simplifyVector = FALSE),
+      error = function(e) list()
+    )
+  } else {
+    list()
+  }
+}
+
+# Save approval to project-local file
+save_approval <- function(cwd, tool_name) {
+  approvals <- load_approvals(cwd)
+  approvals[[tool_name]] <- TRUE
+
+  path <- file.path(cwd, ".llamar", "approvals.json")
+  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
+  jsonlite::write_json(approvals, path, auto_unbox = TRUE, pretty = TRUE)
+}
+
+# Check if tool is already approved for this project
+is_approved <- function(cwd, tool_name) {
+  approvals <- load_approvals(cwd)
+  isTRUE(approvals[[tool_name]])
+}
+
+# Ask user for approval
+ask_approval <- function(name, args) {
+  cat(sprintf("\n%s%s wants to execute:%s\n", color$yellow, name, color$reset))
+  print_tool(name, args)
+
+  # Use bash read for prompt
+  response <- system(
+    sprintf('read -p "%s[a]llow once, [A]llow always, [d]eny: %s" r && echo "$r"',
+            color$yellow, color$reset),
+    intern = TRUE
+  )
+
+  if (length(response) == 0) response <- ""
+
+  list(
+    approved = tolower(response) %in% c("a", "allow", "y", "yes", ""),
+    always = response == "A" || response == "Allow"
+  )
+}
+
+# ============================================================================
 # Main agent loop
 # ============================================================================
 
@@ -454,14 +512,23 @@ run_agent <- function(opts) {
   cat(sprintf("%sConnected. %d tools available.%s\n\n",
               color$dim, length(conn$tools), color$reset))
 
+  # Load skill docs (SKILL.md files)
+  llamaR:::load_skill_docs(path.expand("~/.llamar/skills"))
+  llamaR:::load_skill_docs(file.path(cwd, ".llamar", "skills"))
+  skill_docs <- llamaR:::list_skill_docs()
+
   # Load context files
   context_files <- llamaR:::list_context_files(cwd)
   system_prompt <- llamaR:::load_context(cwd)
 
-  if (length(context_files) > 0) {
+  if (length(context_files) > 0 || length(skill_docs) > 0) {
     cat(sprintf("%sLoaded context:%s\n", color$dim, color$reset))
     for (f in context_files) {
       cat(sprintf("  %s%s%s\n", color$cyan, basename(f), color$reset))
+    }
+    if (length(skill_docs) > 0) {
+      cat(sprintf("  %s%d skill(s): %s%s\n", color$cyan, length(skill_docs),
+                  paste(skill_docs, collapse = ", "), color$reset))
     }
     cat("\n")
   }
@@ -469,8 +536,31 @@ run_agent <- function(opts) {
   # Get tools for LLM
   tools <- mcp_tools_for_api(conn)
 
-  # Tool handler
+  # Get approval settings from config
+  config <- llamaR:::load_config(cwd)
+  approval_mode <- config$approval_mode %||% "ask"
+  dangerous_tools <- config$dangerous_tools %||% c("bash", "run_r", "run_r_script", "write_file")
+
+  # Tool handler (captures cwd, approval_mode, dangerous_tools in closure)
   tool_handler <- function(name, args) {
+    # Check if approval needed (only in "ask" mode)
+    if (approval_mode == "ask" && requires_approval(name, dangerous_tools)) {
+      if (!is_approved(cwd, name)) {
+        approval <- ask_approval(name, args)
+        if (!approval$approved) {
+          cat(sprintf("%sDenied.%s\n", color$dim, color$reset))
+          return("Tool execution denied by user")
+        }
+        if (approval$always) {
+          save_approval(cwd, name)
+          cat(sprintf("%sApproved for this project%s\n", color$dim, color$reset))
+        }
+      }
+    } else if (approval_mode == "deny" && requires_approval(name, dangerous_tools)) {
+      cat(sprintf("%sDenied (approval_mode=deny).%s\n", color$dim, color$reset))
+      return("Tool execution denied by configuration")
+    }
+
     print_tool(name, args)
     result <- tryCatch({
       mcp_call(conn, name, args)
@@ -596,6 +686,37 @@ run_agent <- function(opts) {
           }
         }
         next
+      } else if (cmd == "/remember") {
+        # /remember <fact> - Add to project memory
+        # /remember --global <fact> - Add to global memory
+        if (length(cmd_parts) < 2) {
+          cat("Usage: /remember <fact> or /remember --global <fact>\n")
+          next
+        }
+
+        fact_text <- paste(cmd_parts[-1], collapse = " ")
+        is_global <- startsWith(fact_text, "--global ")
+
+        if (is_global) {
+          fact_text <- sub("^--global ", "", fact_text)
+          memory_path <- path.expand("~/.llamar/MEMORY.md")
+        } else {
+          memory_path <- file.path(cwd, ".llamar", "MEMORY.md")
+        }
+
+        # Create directory if needed
+        dir.create(dirname(memory_path), showWarnings = FALSE, recursive = TRUE)
+
+        # Append fact with timestamp
+        timestamp <- format(Sys.time(), "%Y-%m-%d")
+        entry <- sprintf("- %s (%s)\n", fact_text, timestamp)
+
+        cat(entry, file = memory_path, append = TRUE)
+        cat(sprintf("%sRemembered: %s%s\n", color$green, fact_text, color$reset))
+
+        # Reload context to pick up new memory
+        system_prompt <- llamaR:::load_context(cwd)
+        next
       } else if (cmd == "/help") {
         cat("
 Commands:
@@ -607,6 +728,8 @@ Commands:
   /context       Show loaded context files
   /model <name>  Switch model
   /provider <p>  Switch provider (anthropic, openai, ollama)
+  /remember <f>  Remember a fact (project-local)
+  /remember --global <f>  Remember a fact (global)
   /help          Show this help
 
 ")

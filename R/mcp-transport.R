@@ -7,24 +7,24 @@
 #'
 #' @return NULL (runs until client disconnects)
 #' @noRd
-run_stdio <- function() {
-  log_msg("llamar MCP server starting (stdio)...")
+run_stdio <- function () {
+    log_msg("llamar MCP server starting (stdio)...")
 
-  send_fn <- function(json) {
-    cat(json, "\n", sep = "", file = stdout())
-    flush(stdout())
-  }
-
-  while (TRUE) {
-    line <- readLines(stdin(), n = 1, warn = FALSE)
-    if (length(line) == 0) {
-      log_msg("Client disconnected")
-      break
+    send_fn <- function (json) {
+        cat(json, "\n", sep = "", file = stdout())
+        flush(stdout())
     }
-    process_request(line, send_fn)
-  }
 
-  log_msg("Server stopped")
+    while (TRUE) {
+        line <- readLines(stdin(), n = 1, warn = FALSE)
+        if (length(line) == 0) {
+            log_msg("Client disconnected")
+            break
+        }
+        process_request(line, send_fn)
+    }
+
+    log_msg("Server stopped")
 }
 
 #' Run MCP server with socket transport
@@ -34,47 +34,48 @@ run_stdio <- function() {
 #' @param port Port number to listen on
 #' @return NULL (runs until interrupted)
 #' @noRd
-run_socket <- function(port) {
-  log_msg(sprintf("llamar MCP server starting (socket port %d)...", port))
+run_socket <- function (port) {
+    log_msg(sprintf("llamar MCP server starting (socket port %d)...", port))
 
-  # Create server socket
-  server <- serverSocket(port)
-  on.exit(close(server))
+    # Create server socket
+    server <- serverSocket(port)
+    on.exit(close(server))
 
-  log_msg("Listening on port", port)
+    log_msg("Listening on port", port)
 
-  while (TRUE) {
-    # Accept client connection
-    client <- tryCatch(
-      socketAccept(server, blocking = TRUE, open = "r+b"),
-      error = function(e) NULL
-    )
+    while (TRUE) {
+        # Accept client connection
+        client <- tryCatch(
+            socketAccept(server, blocking = TRUE, open = "r+b"),
+            error = function (e) NULL
+        )
 
-    if (is.null(client)) {
-      log_msg("Accept failed, retrying...")
-      next
-    }
-
-    log_msg("Client connected")
-
-    send_fn <- function(json) {
-      writeLines(json, client)
-    }
-
-    # Handle client requests
-    tryCatch({
-      while (TRUE) {
-        line <- readLines(client, n = 1, warn = FALSE)
-        if (length(line) == 0) {
-          log_msg("Client disconnected")
-          break
+        if (is.null(client)) {
+            log_msg("Accept failed, retrying...")
+            next
         }
-        process_request(line, send_fn)
-      }
-    }, error = function(e) {
-      log_msg("Client error:", e$message)
-    })
 
-    tryCatch(close(client), error = function(e) NULL)
-  }
+        log_msg("Client connected")
+
+        send_fn <- function(json) {
+            writeLines(json, client)
+        }
+
+        # Handle client requests
+        tryCatch({
+                while (TRUE) {
+                    line <- readLines(client, n = 1, warn = FALSE)
+                    if (length(line) == 0) {
+                        log_msg("Client disconnected")
+                        break
+                    }
+                    process_request(line, send_fn)
+                }
+            }, error = function(e) {
+                log_msg("Client error:", e$message)
+            })
+
+        tryCatch(close(client), error = function(e) NULL)
+    }
 }
+

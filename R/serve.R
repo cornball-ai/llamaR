@@ -47,19 +47,31 @@
 #' # Specific categories
 #' serve(port = 7850, tools = c("file", "git"))
 #' }
-serve <- function(port = NULL, cwd = NULL, tools = NULL) {
-  # Set working directory if specified
-  if (!is.null(cwd) && dir.exists(cwd)) {
-    setwd(cwd)
-  }
+serve <- function (port = NULL, cwd = NULL, tools = NULL) {
+    # Set working directory if specified
+    if (!is.null(cwd) && dir.exists(cwd)) {
+        setwd(cwd)
+    }
 
-  # Set tool filter option
-  options(llamar.tools = tools)
+    # Register built-in R skills
+    ensure_skills()
 
-  # Run appropriate transport
-  if (!is.null(port)) {
-    run_socket(port)
-  } else {
-    run_stdio()
-  }
+    # Load user R skills (.R files)
+    load_skills(path.expand("~/.llamar/skills"))
+    load_skills(file.path(getwd(), ".llamar", "skills"))
+
+    # Load skill docs (SKILL.md files) for context injection
+    load_skill_docs(path.expand("~/.llamar/skills"))
+    load_skill_docs(file.path(getwd(), ".llamar", "skills"))
+
+    # Set tool filter option
+    options(llamar.tools = tools)
+
+    # Run appropriate transport
+    if (!is.null(port)) {
+        run_socket(port)
+    } else {
+        run_stdio()
+    }
 }
+
