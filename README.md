@@ -128,6 +128,14 @@ ln -s ~/.openclaw/skills ~/.llamar/skills
 - **Ecosystem access** — R users get the openclaw skill library
 - **Community leverage** — contributions benefit both communities
 
+**Tested openclaw skills:**
+
+|Skill|Description|
+|-----|-----------|
+|`github`|GitHub CLI (`gh`) for issues, PRs, runs|
+|`weather`|Weather via wttr.in|
+|`tmux`|Remote-control tmux sessions|
+
 See [docs/isomorphism.md](docs/isomorphism.md) for our full interoperability approach.
 
 ### R Skills

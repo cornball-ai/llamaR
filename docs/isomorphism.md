@@ -27,6 +27,16 @@ Same format, same loading, same behavior.
 
 Symlink one to the other and skills work in both.
 
+**Verified openclaw skills:**
+
+| Skill | Works in llamaR | Notes |
+|-------|-----------------|-------|
+| `github` | ✅ | `gh` CLI for issues, PRs, CI runs |
+| `weather` | ✅ | wttr.in weather lookup |
+| `tmux` | ✅ | Remote-control tmux sessions |
+
+Most shell-based skills work without modification. Skills using `{baseDir}` placeholders need those helper scripts on PATH.
+
 See [skills.md](skills.md) for the full specification.
 
 ### Session Format (planned)
