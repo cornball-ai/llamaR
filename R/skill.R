@@ -255,11 +255,13 @@ parse_skill_md <- function(path) {
     # Check for YAML frontmatter (starts with ---)
     if (!grepl("^---\\s*$", lines[1])) {
         # No frontmatter, treat entire file as body
+        body <- paste(lines, collapse = "\n")
+        body <- gsub("\\{baseDir\\}", dirname(path), body)
         return(list(
             name = tools::file_path_sans_ext(basename(dirname(path))),
             description = "",
             metadata = list(),
-            body = paste(lines, collapse = "\n"),
+            body = body,
             path = path
         ))
     }
@@ -268,11 +270,13 @@ parse_skill_md <- function(path) {
     end_idx <- which(grepl("^---\\s*$", lines[-1]))[1] + 1
     if (is.na(end_idx)) {
         # No closing ---, treat as no frontmatter
+        body <- paste(lines, collapse = "\n")
+        body <- gsub("\\{baseDir\\}", dirname(path), body)
         return(list(
             name = tools::file_path_sans_ext(basename(dirname(path))),
             description = "",
             metadata = list(),
-            body = paste(lines, collapse = "\n"),
+            body = body,
             path = path
         ))
     }
@@ -284,11 +288,16 @@ parse_skill_md <- function(path) {
     # Parse YAML frontmatter (simple key: value parsing)
     frontmatter <- parse_yaml_simple(frontmatter_lines)
 
+    # Template {baseDir} to skill directory (openclaw compatibility)
+    skill_dir <- dirname(path)
+    body <- paste(body_lines, collapse = "\n")
+    body <- gsub("\\{baseDir\\}", skill_dir, body)
+
     list(
         name = frontmatter$name %||% tools::file_path_sans_ext(basename(dirname(path))),
         description = frontmatter$description %||% "",
         metadata = frontmatter$metadata %||% list(),
-        body = paste(body_lines, collapse = "\n"),
+        body = body,
         path = path
     )
 }

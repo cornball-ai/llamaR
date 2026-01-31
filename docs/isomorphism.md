@@ -35,7 +35,7 @@ Symlink one to the other and skills work in both.
 | `weather` | ✅ | wttr.in weather lookup |
 | `tmux` | ✅ | Remote-control tmux sessions |
 
-Most shell-based skills work without modification. Skills using `{baseDir}` placeholders need those helper scripts on PATH.
+Shell-based skills work without modification. llamaR templates `{baseDir}` to the skill's directory using `gsub("{baseDir}", dirname(path), body)`, so helper scripts resolve correctly when symlinked.
 
 See [skills.md](skills.md) for the full specification.
 
