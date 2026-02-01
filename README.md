@@ -209,12 +209,87 @@ Chain tools from multiple servers.
 
 ## Installation
 
-```r
-install.packages("llamaR")
-llamaR::install_cli()
+### System Requirements
+
+- **R** (>= 4.4.0)
+- **littler** — fast R scripting frontend (recommended)
+
+```bash
+# Ubuntu/Debian
+sudo apt install littler
+
+# Or from R
+install.packages("littler")
 ```
 
-Then:
+### R Package
+
+```r
+# Install llamaR (not yet on CRAN)
+remotes::install_github("cornball-ai/llamaR")
+
+# Install the CLI to ~/bin
+llamaR::install_cli()
+
+# Add ~/bin to PATH if needed
+# export PATH="$HOME/bin:$PATH"
+```
+
+### Required R Packages
+
+```r
+# Core dependencies (on CRAN)
+install.packages(c("curl", "jsonlite"))
+
+# LLM provider abstraction (not on CRAN)
+remotes::install_github("cornball-ai/llm.api")
+```
+
+### API Keys
+
+Set in `~/.Renviron`:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+TAVILY_API_KEY=tvly-...   # Optional, for web search
+```
+
+### Voice Mode (Optional)
+
+Voice mode requires additional packages and services:
+
+```r
+# R packages
+remotes::install_github("cornball-ai/stt.api")  # Speech-to-text
+remotes::install_github("cornball-ai/tts.api")  # Text-to-speech
+
+# System packages (Ubuntu)
+sudo apt install sox alsa-utils ffmpeg
+```
+
+Voice services must be running:
+- STT: `whisper` or compatible API on port 4123
+- TTS: `qwen3-tts-api` or compatible API on port 7812
+
+### Memory Index (Optional)
+
+For searchable conversation history:
+
+```r
+install.packages("duckdb")
+install.packages("digest")
+
+# Import Claude Code history
+llamaR::memory_import_claude()
+
+# Search
+llamaR::memory_search_fts("your query")
+```
+
+-----
+
+## Quick Start
 
 ```bash
 llamar
