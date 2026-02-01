@@ -22,6 +22,7 @@ transport_new <- function (type, config = list()) {
 #' - channel: Transport type (terminal, signal, etc.)
 #' - sender: Sender identifier
 #' - text: Message text
+#' - attachments: List of attachment objects (path, contentType, size, etc.)
 #' - timestamp: POSIXct timestamp
 #' - metadata: Transport-specific data
 #'
@@ -29,16 +30,18 @@ transport_new <- function (type, config = list()) {
 #' @param sender Sender identifier
 #' @param channel Channel name
 #' @param id Optional message ID
+#' @param attachments Optional list of attachments
 #' @param metadata Optional metadata list
 #' @return Normalized message list
 #' @noRd
 message_normalize <- function (text, sender, channel, id = NULL,
-                               metadata = list()) {
+                               attachments = list(), metadata = list()) {
     list(
-        id = id %||% paste0(channel, "_", as.integer(Sys.time() * 1000)),
+        id = id %||% paste0(channel, "_", format(as.numeric(Sys.time()) * 1000, scientific = FALSE)),
         channel = channel,
         sender = sender,
         text = text,
+        attachments = attachments,
         timestamp = Sys.time(),
         metadata = metadata
     )

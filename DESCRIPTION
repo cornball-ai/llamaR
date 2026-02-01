@@ -16,7 +16,12 @@ Imports:
     curl,
     jsonlite
 Suggests:
+    DBI,
+    digest,
+    duckdb,
     fyi,
     llm.api,
-    tinytest
+    stt.api,
+    tinytest,
+    tts.api
 Encoding: UTF-8

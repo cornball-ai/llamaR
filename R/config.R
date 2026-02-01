@@ -95,6 +95,26 @@ load_config <- function (cwd = getwd()) {
     if (is.null(config$dangerous_tools)) {
         config$dangerous_tools <- c("bash", "run_r", "run_r_script", "write_file")
     }
+    # Per-tool permissions (overrides dangerous_tools)
+    # config$permissions = list(bash = "deny", read_file = "allow")
+    if (is.null(config$permissions)) {
+        config$permissions <- list()
+    }
+
+    # Filesystem sandboxing
+    # config$allowed_paths - if set, only these paths are accessible
+    # config$denied_paths - these paths are always blocked
+    if (is.null(config$denied_paths)) {
+        config$denied_paths <- c(
+            "~/.ssh",
+            "~/.gnupg",
+            "~/.aws",
+            "~/.config/gcloud",
+            "~/.kube",
+            "~/.docker"
+        )
+    }
+    # Note: allowed_paths is NULL by default (no restriction)
 
     # Skill paths (additional directories to load skills from)
     if (is.null(config$skill_paths)) {
@@ -105,6 +125,55 @@ load_config <- function (cwd = getwd()) {
     if (is.null(config$skill_timeout)) {
         config$skill_timeout <- 30L
     }
+
+    # Voice mode config
+    if (is.null(config$voice)) {
+        config$voice <- list()
+    }
+    voice <- config$voice
+    if (is.null(voice$enabled)) {
+        voice$enabled <- FALSE
+    }
+    # TTS config
+    if (is.null(voice$tts)) {
+        voice$tts <- list()
+    }
+    if (is.null(voice$tts$backend)) {
+        voice$tts$backend <- "qwen3"# qwen3, chatterbox, openai, elevenlabs
+    }
+    if (is.null(voice$tts$voice)) {
+        voice$tts$voice <- "default"
+    }
+    if (is.null(voice$tts$port)) {
+        voice$tts$port <- 7812L# qwen3-tts-api default port
+    }
+    # STT config
+    if (is.null(voice$stt)) {
+        voice$stt <- list()
+    }
+    if (is.null(voice$stt$backend)) {
+        voice$stt$backend <- "whisper"# whisper (native), api
+    }
+    if (is.null(voice$stt$port)) {
+        voice$stt$port <- 4123L# only used for api backend
+    }
+    if (is.null(voice$stt$model)) {
+        voice$stt$model <- "base"# whisper model: tiny, base, small, medium, large
+    }
+    # Audio config
+    if (is.null(voice$audio)) {
+        voice$audio <- list()
+    }
+    if (is.null(voice$audio$input_device)) {
+        voice$audio$input_device <- NULL# Use default device
+    }
+    if (is.null(voice$audio$sample_rate)) {
+        voice$audio$sample_rate <- 16000L
+    }
+    if (is.null(voice$audio$format)) {
+        voice$audio$format <- "wav"
+    }
+    config$voice <- voice
 
     # Channels config (matches openclaw structure)
     if (is.null(config$channels)) {
@@ -129,6 +198,13 @@ load_config <- function (cwd = getwd()) {
     # sig$account - required, no default
     # sig$allowFrom - optional allowlist (E.164 numbers)
     # sig$cliPath - optional path to signal-cli
+    # Chunking config (matches openclaw)
+    if (is.null(sig$textChunkLimit)) {
+        sig$textChunkLimit <- 4000L
+    }
+    if (is.null(sig$chunkMode)) {
+        sig$chunkMode <- "length"# "length" or "newline"
+    }
     config$channels$signal <- sig
 
     config

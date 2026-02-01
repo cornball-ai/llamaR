@@ -1,6 +1,243 @@
 # Signal Transport
 # Connects to signal-cli daemon via HTTP JSON-RPC + SSE
 
+# ============================================================================
+# Pure helper functions (top-level, testable)
+# ============================================================================
+
+#' Check if signal-cli daemon is running
+#'
+#' @param base_url Base URL of the daemon
+#' @return TRUE if daemon responds, FALSE otherwise
+#' @noRd
+signal_check_daemon <- function (base_url) {
+    url <- sprintf("%s/api/v1/check", base_url)
+    tryCatch({
+            h <- curl::new_handle()
+            curl::handle_setopt(h, timeout = 5)
+            resp <- curl::curl_fetch_memory(url, handle = h)
+            resp$status_code == 200
+        }, error = function (e) FALSE)
+}
+
+#' Send JSON-RPC request to signal-cli daemon
+#'
+#' @param base_url Base URL of the daemon
+#' @param method RPC method name
+#' @param params List of parameters
+#' @return Result from RPC call, or NULL for 201 responses
+#' @noRd
+signal_rpc_request <- function(base_url, method, params = list()) {
+    url <- sprintf("%s/api/v1/rpc", base_url)
+    body <- jsonlite::toJSON(list(
+            jsonrpc = "2.0",
+            method = method,
+            params = params,
+            id = as.character(as.numeric(Sys.time()) * 1000)
+        ), auto_unbox = TRUE, null = "null")
+
+    h <- curl::new_handle()
+    curl::handle_setopt(h,
+        customrequest = "POST",
+        postfields = body,
+        timeout = 30
+    )
+    curl::handle_setheaders(h, "Content-Type" = "application/json")
+
+    resp <- curl::curl_fetch_memory(url, handle = h)
+
+    if (resp$status_code >= 400) {
+        stop("Signal RPC error: HTTP ", resp$status_code, call. = FALSE)
+    }
+
+    if (resp$status_code == 201) {
+        return(NULL)
+    }
+
+    result <- jsonlite::fromJSON(rawToChar(resp$content), simplifyVector = FALSE)
+    if (!is.null(result$error)) {
+        stop("Signal RPC error: ", result$error$message %||% "Unknown", call. = FALSE)
+    }
+    result$result
+}
+
+#' Parse attachments from Signal message
+#'
+#' @param attachments List of attachment objects from dataMessage
+#' @return Normalized list of attachments
+#' @noRd
+signal_parse_attachments <- function(attachments) {
+    if (is.null(attachments) || length(attachments) == 0) {
+        return(list())
+    }
+
+    lapply(attachments, function(att) {
+            list(
+                id = att$id,
+                contentType = att$contentType %||% "application/octet-stream",
+                filename = att$filename,
+                size = att$size,
+                width = att$width,
+                height = att$height,
+                path = att$file
+            )
+        })
+}
+
+#' Parse a Signal envelope into a normalized message
+#'
+#' @param envelope Envelope object from SSE event
+#' @param allow_from Character vector of allowed sender numbers (empty = allow all)
+#' @return Normalized message list, or NULL if not a valid message
+#' @noRd
+signal_parse_envelope <- function(envelope, allow_from = character()) {
+    if (is.null(envelope)) return(NULL)
+
+    sender <- envelope$source %||% envelope$sourceNumber
+    if (is.null(sender)) return(NULL)
+
+    # Handle receipt messages (delivery/read)
+    if (!is.null(envelope$receiptMessage)) {
+        receipt <- envelope$receiptMessage
+        return(message_normalize(
+                text = "",
+                sender = sender,
+                channel = "signal",
+                id = as.character(envelope$timestamp),
+                metadata = list(
+                    type = "receipt",
+                    receipt_type = if (isTRUE(receipt$isDelivery)) "delivery"
+                    else if (isTRUE(receipt$isRead)) "read"
+                    else "unknown",
+                    timestamps = receipt$timestamps,
+                    timestamp = envelope$timestamp
+                )
+            ))
+    }
+
+    # Handle reaction messages
+    if (!is.null(envelope$dataMessage$reaction)) {
+        reaction <- envelope$dataMessage$reaction
+        return(message_normalize(
+                text = "",
+                sender = sender,
+                channel = "signal",
+                id = as.character(envelope$timestamp),
+                metadata = list(
+                    type = "reaction",
+                    emoji = reaction$emoji,
+                    is_remove = isTRUE(reaction$isRemove),
+                    target_sender = reaction$targetAuthor,
+                    target_timestamp = reaction$targetSentTimestamp,
+                    timestamp = envelope$timestamp
+                )
+            ))
+    }
+
+    # Get message content
+    dm <- envelope$dataMessage
+    if (is.null(dm)) return(NULL)
+
+    # Check allowlist
+    if (length(allow_from) > 0 && !sender %in% allow_from) {
+        log_msg("Signal: ignoring message from", sender, "(not in allow_from)")
+        return(NULL)
+    }
+
+    text <- dm$message %||% ""
+    attachments <- signal_parse_attachments(dm$attachments)
+
+    # Require text or attachments
+    if (nchar(text) == 0 && length(attachments) == 0) return(NULL)
+
+    timestamp <- envelope$timestamp %||% as.numeric(Sys.time()) * 1000
+
+    # Extract group info
+    group_id <- NULL
+    group_name <- NULL
+    if (!is.null(dm$groupInfo)) {
+        group_id <- dm$groupInfo$groupId
+        group_name <- dm$groupInfo$groupName
+    }
+
+    message_normalize(
+        text = text,
+        sender = sender,
+        channel = "signal",
+        id = as.character(timestamp),
+        attachments = attachments,
+        metadata = list(
+            group_id = group_id,
+            group_name = group_name,
+            is_group = !is.null(group_id),
+            timestamp = timestamp
+        )
+    )
+}
+
+#' Parse SSE event JSON into a normalized message
+#'
+#' @param data_json JSON string from SSE data field
+#' @param allow_from Character vector of allowed senders
+#' @return Normalized message, or NULL on error/invalid
+#' @noRd
+signal_parse_sse_event <- function(data_json, allow_from = character()) {
+    tryCatch({
+            event <- jsonlite::fromJSON(data_json, simplifyVector = FALSE)
+            signal_parse_envelope(event$envelope, allow_from)
+        }, error = function(e) {
+            log_msg("Signal: failed to parse event:", e$message)
+            NULL
+        })
+}
+
+#' Process SSE buffer and extract complete events
+#'
+#' @param buffer Current buffer string
+#' @param current_event Current partial event being built
+#' @param allow_from Allowed senders for filtering
+#' @return List with: buffer (remaining), current_event, messages (list of parsed messages)
+#' @noRd
+sse_process_buffer <- function(buffer, current_event, allow_from = character()) {
+    messages <- list()
+
+    while (grepl("\n", buffer)) {
+        newline_pos <- regexpr("\n", buffer)[1]
+        line <- substr(buffer, 1, newline_pos - 1)
+        buffer <- substr(buffer, newline_pos + 1, nchar(buffer))
+        line <- sub("\r$", "", line)
+
+        if (line == "") {
+            # Empty line = end of event
+            if (!is.null(current_event$data)) {
+                msg <- signal_parse_sse_event(current_event$data, allow_from)
+                if (!is.null(msg)) {
+                    messages <- c(messages, list(msg))
+                }
+            }
+            current_event <- list()
+        } else if (startsWith(line, "data:")) {
+            data_value <- sub("^data: ?", "", line)
+            current_event$data <- if (is.null(current_event$data)) {
+                data_value
+            } else {
+                paste0(current_event$data, "\n", data_value)
+            }
+        } else if (startsWith(line, "event:")) {
+            current_event$event <- sub("^event: ?", "", line)
+        } else if (startsWith(line, "id:")) {
+            current_event$id <- sub("^id: ?", "", line)
+        }
+        # Ignore comment lines (starting with :)
+    }
+
+    list(buffer = buffer, current_event = current_event, messages = messages)
+}
+
+# ============================================================================
+# Transport factory
+# ============================================================================
+
 #' Signal transport
 #'
 #' Requires signal-cli running in daemon mode:
@@ -14,12 +251,10 @@
 #'   - allowFrom: Vector of allowed sender numbers (optional)
 #' @return Transport object
 #' @noRd
-transport_signal <- function (config = list()) {
-    # Resolve base URL (httpUrl overrides httpHost/httpPort)
+transport_signal <- function(config = list()) {
+    # Resolve base URL
     if (!is.null(config$httpUrl) && nchar(trimws(config$httpUrl)) > 0) {
-        base_url <- trimws(config$httpUrl)
-        # Remove trailing slash
-        base_url <- sub("/+$", "", base_url)
+        base_url <- sub("/+$", "", trimws(config$httpUrl))
     } else {
         host <- config$httpHost %||% "127.0.0.1"
         port <- config$httpPort %||% 8080L
@@ -27,284 +262,116 @@ transport_signal <- function (config = list()) {
     }
 
     account <- config$account
-    allow_from <- config$allowFrom %||% character()
-
     if (is.null(account)) {
         stop("Signal transport requires 'account' (phone number)", call. = FALSE)
     }
 
-    # Message queue for received messages
-    msg_queue <- new.env(parent = emptyenv())
-    msg_queue$messages <- list()
-    msg_queue$running <- FALSE
-    msg_queue$handle <- NULL
+    allow_from <- config$allowFrom %||% character()
+    text_chunk_limit <- config$textChunkLimit %||% 4000L
+    chunk_mode <- config$chunkMode %||% "length"
 
-    # Check if daemon is running
-    check_daemon <- function () {
-        url <- sprintf("%s/api/v1/check", base_url)
-        tryCatch({
-                h <- curl::new_handle()
-                curl::handle_setopt(h, timeout = 5)
-                resp <- curl::curl_fetch_memory(url, handle = h)
-                resp$status_code == 200
-            }, error = function (e) FALSE)
+    # SSE state
+    sse_url <- sprintf("%s/api/v1/events?account=%s",
+        base_url, utils::URLencode(account, reserved = TRUE))
+    running <- FALSE
+
+    # Helper: make RPC call with this base_url
+    rpc <- function(method, params = list()) {
+        signal_rpc_request(base_url, method, params)
     }
 
-    # Send JSON-RPC request
-    rpc_request <- function(method, params = list()) {
-        url <- sprintf("%s/api/v1/rpc", base_url)
-        body <- jsonlite::toJSON(list(
-                jsonrpc = "2.0",
-                method = method,
-                params = params,
-                id = as.character(as.integer(Sys.time() * 1000))
-            ), auto_unbox = TRUE, null = "null")
-
-        h <- curl::new_handle()
-        curl::handle_setopt(h,
-            customrequest = "POST",
-            postfields = body,
-            timeout = 30
-        )
-        curl::handle_setheaders(h, "Content-Type" = "application/json")
-
-        resp <- curl::curl_fetch_memory(url, handle = h)
-
-        if (resp$status_code >= 400) {
-            stop("Signal RPC error: HTTP ", resp$status_code, call. = FALSE)
-        }
-
-        if (resp$status_code == 201) {
-            return(NULL) # No content
-        }
-
-        result <- jsonlite::fromJSON(rawToChar(resp$content), simplifyVector = FALSE)
-        if (!is.null(result$error)) {
-            stop("Signal RPC error: ", result$error$message %||% "Unknown", call. = FALSE)
-        }
-        result$result
-    }
-
-    # Parse SSE event data
-    parse_signal_event <- function(data_json) {
-        tryCatch({
-                event <- jsonlite::fromJSON(data_json, simplifyVector = FALSE)
-
-                # Handle envelope (incoming message)
-                envelope <- event$envelope
-                if (is.null(envelope)) return(NULL)
-
-                # Get message content
-                dm <- envelope$dataMessage
-                if (is.null(dm)) return(NULL)
-
-                sender <- envelope$source %||% envelope$sourceNumber
-                if (is.null(sender)) return(NULL)
-
-                # Check allowlist
-                if (length(allow_from) > 0 && !sender %in% allow_from) {
-                    log_msg("Signal: ignoring message from", sender, "(not in allow_from)")
-                    return(NULL)
-                }
-
-                text <- dm$message
-                if (is.null(text) || nchar(text) == 0) return(NULL)
-
-                timestamp <- envelope$timestamp %||% as.integer(Sys.time() * 1000)
-
-                message_normalize(
-                    text = text,
-                    sender = sender,
-                    channel = "signal",
-                    id = as.character(timestamp),
-                    metadata = list(
-                        group_id = dm$groupInfo$groupId,
-                        timestamp = timestamp
-                    )
-                )
-            }, error = function(e) {
-                log_msg("Signal: failed to parse event:", e$message)
-                NULL
-            })
-    }
-
-    # Start SSE listener (runs in background)
-    start_sse <- function() {
-        if (msg_queue$running) return(invisible(NULL))
-        msg_queue$running <- TRUE
-
-        url <- sprintf("%s/api/v1/events?account=%s", base_url, utils::URLencode(account, reserved = TRUE))
-
-        # Buffer for SSE parsing
-        buffer <- ""
-        current_event <- list()
-
-        # Callback for streaming data
-        callback <- function(data) {
-            if (!msg_queue$running) return(FALSE) # Stop streaming
-
-            chunk <- rawToChar(data)
-            buffer <<- paste0(buffer, chunk)
-
-            # Process complete lines
-            while (grepl("\n", buffer)) {
-                newline_pos <- regexpr("\n", buffer)[1]
-                line <- substr(buffer, 1, newline_pos - 1)
-                buffer <<- substr(buffer, newline_pos + 1, nchar(buffer))
-
-                # Remove trailing \r
-                line <- sub("\r$", "", line)
-
-                if (line == "") {
-                    # Empty line = end of event
-                    if (!is.null(current_event$data)) {
-                        msg <- parse_signal_event(current_event$data)
-                        if (!is.null(msg)) {
-                            msg_queue$messages <- c(msg_queue$messages, list(msg))
-                        }
-                    }
-                    current_event <<- list()
-                } else if (startsWith(line, "data:")) {
-                    data_value <- sub("^data: ?", "", line)
-                    current_event$data <<- if (is.null(current_event$data)) {
-                        data_value
-                    } else {
-                        paste0(current_event$data, "\n", data_value)
-                    }
-                } else if (startsWith(line, "event:")) {
-                    current_event$event <<- sub("^event: ?", "", line)
-                } else if (startsWith(line, "id:")) {
-                    current_event$id <<- sub("^id: ?", "", line)
-                }
-                # Ignore comment lines (starting with :)
-            }
-
-            TRUE# Continue streaming
-        }
-
-        # Start streaming in a separate R process would be ideal,
-        # but for now we'll use blocking mode with timeout
-        h <- curl::new_handle()
-        curl::handle_setheaders(h, "Accept" = "text/event-stream")
-
-        # Store handle for cleanup
-        msg_queue$handle <- h
-        msg_queue$url <- url
-    }
-
-    # Poll for new messages (blocking with timeout)
+    # Poll SSE for messages
     poll_messages <- function(timeout_secs = 1) {
-        if (!msg_queue$running) {
-            start_sse()
-        }
-
-        # Use curl_fetch_stream with timeout
         h <- curl::new_handle()
         curl::handle_setopt(h, timeout = timeout_secs)
         curl::handle_setheaders(h, "Accept" = "text/event-stream")
 
         buffer <- ""
         current_event <- list()
+        all_messages <- list()
 
         tryCatch({
-                curl::curl_fetch_stream(msg_queue$url, function(data) {
+                curl::curl_fetch_stream(sse_url, function(data) {
                         chunk <- rawToChar(data)
                         buffer <<- paste0(buffer, chunk)
 
-                        # Process complete lines
-                        while (grepl("\n", buffer)) {
-                            newline_pos <- regexpr("\n", buffer)[1]
-                            line <- substr(buffer, 1, newline_pos - 1)
-                            buffer <<- substr(buffer, newline_pos + 1, nchar(buffer))
-                            line <- sub("\r$", "", line)
-
-                            if (line == "") {
-                                if (!is.null(current_event$data)) {
-                                    msg <- parse_signal_event(current_event$data)
-                                    if (!is.null(msg)) {
-                                        msg_queue$messages <- c(msg_queue$messages, list(msg))
-                                    }
-                                }
-                                current_event <<- list()
-                            } else if (startsWith(line, "data:")) {
-                                data_value <- sub("^data: ?", "", line)
-                                current_event$data <<- if (is.null(current_event$data)) {
-                                    data_value
-                                } else {
-                                    paste0(current_event$data, "\n", data_value)
-                                }
-                            }
-                        }
+                        result <- sse_process_buffer(buffer, current_event, allow_from)
+                        buffer <<- result$buffer
+                        current_event <<- result$current_event
+                        all_messages <<- c(all_messages, result$messages)
 
                         TRUE
                     }, handle = h)
             }, error = function(e) {
-                # Timeout or connection error - that's ok
                 if (!grepl("Timeout|timed out", e$message, ignore.case = TRUE)) {
                     log_msg("Signal SSE error:", e$message)
                 }
             })
 
-        # Return queued messages
-        if (length(msg_queue$messages) > 0) {
-            msgs <- msg_queue$messages
-            msg_queue$messages <- list()
-            msgs
-        } else {
-            list()
-        }
+        all_messages
     }
 
     list(
         type = "signal",
         config = config,
 
-        # Check if daemon is available
-        check = check_daemon,
+        check = function() signal_check_daemon(base_url),
 
-        # Receive messages (polls SSE, returns list of messages)
         receive = function(timeout = 1) {
             poll_messages(timeout)
         },
 
-        # Receive one message (blocking)
         receive_one = function(timeout = 30) {
             start_time <- Sys.time()
             while (difftime(Sys.time(), start_time, units = "secs") < timeout) {
                 msgs <- poll_messages(1)
-                if (length(msgs) > 0) {
-                    return(msgs[[1]])
-                }
+                if (length(msgs) > 0) return(msgs[[1]])
             }
             NULL
         },
 
-        # Send a message
         send = function(msg) {
-            # Determine recipient
             recipient <- msg$metadata$reply_to %||% msg$sender
             if (is.null(recipient)) {
                 stop("Signal send: no recipient", call. = FALSE)
             }
 
-            params <- list(
-                message = msg$text,
-                account = account
-            )
-
-            # Check if group message
             group_id <- msg$metadata$group_id
-            if (!is.null(group_id)) {
-                params$groupId <- group_id
-            } else {
-                params$recipient <- list(recipient)
+            chunks <- chunk_text_with_mode(msg$text, text_chunk_limit, chunk_mode)
+            if (length(chunks) == 0) chunks <- ""
+
+            # Collect valid attachment paths
+            attachment_paths <- character()
+            if (!is.null(msg$attachments)) {
+                for (att in msg$attachments) {
+                    if (!is.null(att$path) && file.exists(att$path)) {
+                        attachment_paths <- c(attachment_paths, att$path)
+                    }
+                }
             }
 
-            result <- rpc_request("send", params)
-            invisible(result)
+            results <- list()
+            for (i in seq_along(chunks)) {
+                params <- list(message = chunks[[i]], account = account)
+
+                if (!is.null(group_id)) {
+                    params$groupId <- group_id
+                } else {
+                    params$recipient <- list(recipient)
+                }
+
+                # Attach files to last chunk only
+                if (i == length(chunks) && length(attachment_paths) > 0) {
+                    params$attachments <- as.list(attachment_paths)
+                }
+
+                results <- c(results, list(rpc("send", params)))
+                if (length(chunks) > 1) Sys.sleep(0.1)
+            }
+
+            invisible(results)
         },
 
-        # Send typing indicator
         send_typing = function(recipient, group_id = NULL, stop = FALSE) {
             params <- list(account = account)
             if (!is.null(group_id)) {
@@ -314,16 +381,74 @@ transport_signal <- function (config = list()) {
             }
             if (stop) params$stop <- TRUE
 
-            tryCatch(
-                rpc_request("sendTyping", params),
-                error = function(e) NULL
-            )
+            tryCatch(rpc("sendTyping", params), error = function(e) NULL)
             invisible(NULL)
         },
 
-        # Close transport
+        send_reaction = function(target_sender, target_timestamp, emoji,
+            group_id = NULL, remove = FALSE) {
+            params <- list(
+                account = account,
+                targetAuthor = target_sender,
+                targetTimestamp = target_timestamp,
+                emoji = emoji
+            )
+            if (!is.null(group_id)) {
+                params$groupId <- group_id
+            } else {
+                params$recipient <- list(target_sender)
+            }
+            if (remove) params$remove <- TRUE
+
+            tryCatch(rpc("sendReaction", params), error = function(e) {
+                    log_msg("Signal: failed to send reaction:", e$message)
+                    NULL
+                })
+            invisible(NULL)
+        },
+
+        list_groups = function() {
+            tryCatch({
+                    result <- rpc("listGroups", list(account = account))
+                    if (is.null(result)) return(list())
+                    lapply(result, function(g) {
+                            list(
+                                id = g$id,
+                                name = g$name,
+                                description = g$description,
+                                members = g$members,
+                                is_admin = g$isAdmin %||% FALSE,
+                                is_blocked = g$isBlocked %||% FALSE
+                            )
+                        })
+                }, error = function(e) {
+                    log_msg("Signal: failed to list groups:", e$message)
+                    list()
+                })
+        },
+
+        get_account = function() {
+            tryCatch({
+                    result <- rpc("listAccounts", list())
+                    if (is.null(result)) return(NULL)
+                    for (acc in result) {
+                        if (acc$number == account) {
+                            return(list(
+                                    number = acc$number,
+                                    uuid = acc$uuid,
+                                    device_id = acc$deviceId
+                                ))
+                        }
+                    }
+                    NULL
+                }, error = function(e) {
+                    log_msg("Signal: failed to get account info:", e$message)
+                    NULL
+                })
+        },
+
         close = function() {
-            msg_queue$running <- FALSE
+            running <<- FALSE
             invisible(NULL)
         }
     )

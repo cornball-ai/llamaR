@@ -1,5 +1,8 @@
 # tinyrox says don't edit this manually, but it can't stop you!
 
 export(install_cli)
+export(memory_import_claude)
+export(memory_search_fts)
+export(memory_stats)
 export(serve)
 export(uninstall_cli)

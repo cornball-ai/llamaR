@@ -56,14 +56,65 @@ Compatible structure enables:
 
 ### Memory Format (planned)
 
-Markdown-based memory with optional SQLite indexing:
+Markdown-based memory with optional database indexing:
 
 ```
 ~/.llamar/
 ├── MEMORY.md              # Curated long-term memory
 └── memory/
     ├── 2025-01-30.md      # Daily append log
-    └── memory.sqlite      # Vector index (optional)
+    └── memory.duckdb      # Vector + FTS index
+```
+
+#### Database Choice: DuckDB vs SQLite
+
+openclaw uses SQLite for the memory index. llamaR uses DuckDB. Analysis:
+
+**Real-world usage data (2026-01):**
+
+| Agent | Storage | Sessions | Largest |
+|-------|---------|----------|---------|
+| Claude Code | 522 MB | 899 | 60 MB |
+| OpenAI Codex | 12 MB | 5 | 7.3 MB |
+| llamaR | 332 KB | few | small |
+
+At 500+ MB scale (heavy Claude Code user), DuckDB's advantages apply:
+
+| Factor | SQLite | DuckDB | At 500MB |
+|--------|--------|--------|----------|
+| Vector similarity | Row-by-row | Vectorized | **DuckDB** |
+| Bulk reindex | Slow | Fast | **DuckDB** |
+| Hybrid search scoring | OK | Optimized | **DuckDB** |
+| Native arrays | JSON text | `DOUBLE[]` | **DuckDB** |
+| Startup latency | Fast | Slower | SQLite |
+| Concurrent writes | WAL | Single writer | SQLite |
+
+**Decision**: DuckDB for llamaR because:
+1. Memory indexing is async (startup latency doesn't block CLI)
+2. Single-writer is fine (indexer is one process)
+3. Vector search at scale benefits from columnar execution
+4. Native `DOUBLE[]` arrays avoid JSON encoding overhead
+
+**Schema compatibility**: Same logical tables (files, chunks, meta), different engine.
+
+```sql
+-- DuckDB schema (llamaR)
+CREATE TABLE chunks (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL,
+  embedding DOUBLE[] NOT NULL,  -- native array
+  ...
+);
+
+-- SQLite schema (openclaw)
+CREATE TABLE chunks (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL,
+  embedding TEXT NOT NULL,  -- JSON array
+  ...
+);
 ```
 
 ### Configuration (planned)
@@ -129,14 +180,14 @@ Config structure now matches openclaw.
 | Typing indicators | ✅ | ✅ | |
 | Per-sender history | ✅ | ✅ | |
 | Allowlist | ✅ | ✅ | |
+| Message chunking | ✅ | ✅ | Same config: `textChunkLimit`, `chunkMode` |
+| Attachments | ✅ | ✅ | Send and receive |
+| Group support | ✅ | ✅ | Group ID, name, and type in metadata |
+| Reactions | ✅ | ✅ | Send and receive |
+| Read receipts | ✅ | ✅ | Delivery and read receipts |
 | Multi-account | ✅ | ❌ | Low priority |
 | Pairing codes | ✅ | ❌ | Medium priority |
-| Group support | ✅ | ⚠️ Partial | |
-| Auto-spawn daemon | ✅ | ❌ | |
-| Read receipts | ✅ | ❌ | |
-| Reactions | ✅ | ❌ | |
-| Message chunking | ✅ | ❌ | Medium priority |
-| Attachments | ✅ | ❌ | Medium priority |
+| Auto-spawn daemon | ✅ | ❌ | Low priority |
 
 ### Running Modes
 
@@ -148,20 +199,21 @@ Config structure now matches openclaw.
 
 ### TODO for Signal Parity
 
-**High:**
-- ~~Move config under `channels.signal.*`~~ ✅ Done
-- ~~Add `httpUrl` as alternative to `httpHost`/`httpPort`~~ ✅ Done
-- Message chunking for long responses
+**Completed (Sprint 2):**
+- ~~Move config under `channels.signal.*`~~ ✅
+- ~~Add `httpUrl` as alternative to `httpHost`/`httpPort`~~ ✅
+- ~~Message chunking for long responses~~ ✅
+- ~~Group message handling~~ ✅
+- ~~Attachment support~~ ✅
+- ~~Reactions~~ ✅
+- ~~Read receipts~~ ✅
 
 **Medium:**
-- Pairing code flow
-- Group message handling
-- Attachment support
+- Pairing code flow for initial setup
 
 **Low:**
-- Multi-account
+- Multi-account support
 - Auto-spawn daemon
-- Reactions
 
 ## Workspace Files
 
