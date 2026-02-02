@@ -359,9 +359,14 @@ Format as a structured summary the assistant can use to continue the work.
 do_compact <- function(session, provider, model, system_prompt) {
   cat(sprintf("%s\nAuto-compacting conversation...%s\n", color$cyan, color$reset))
 
-  # Build conversation text from messages
+  # Build conversation text from messages (extract text from content blocks)
   conv_text <- vapply(session$messages, function(m) {
-    sprintf("[%s]: %s", m$role, m$content)
+    text <- if (is.list(m$content) && length(m$content) > 0 && !is.null(m$content[[1]]$text)) {
+      m$content[[1]]$text
+    } else {
+      m$content
+    }
+    sprintf("[%s]: %s", m$role, text)
   }, character(1))
   conv_text <- paste(conv_text, collapse = "\n\n")
 
@@ -502,7 +507,7 @@ run_agent <- function(opts) {
 
   # Handle --list (exit early)
   if (isTRUE(opts$list)) {
-    sessions <- llamaR:::session_list(cwd)
+    sessions <- llamaR:::session_list()
     cat(llamaR:::format_session_list(sessions), "\n")
     return(invisible(NULL))
   }
@@ -511,8 +516,8 @@ run_agent <- function(opts) {
   session <- NULL
 
   if (!is.null(opts$session)) {
-    # Resume specific session
-    session <- llamaR:::session_load(opts$session, cwd)
+    # Resume specific session (opts$session is session_key)
+    session <- llamaR:::session_load(opts$session)
     if (is.null(session)) {
       cat(sprintf("%sSession not found: %s%s\n", color$yellow, opts$session, color$reset))
       return(invisible(NULL))
@@ -522,7 +527,7 @@ run_agent <- function(opts) {
     opts$provider <- session$provider %||% opts$provider
   } else if (opts$resume) {
     # Resume latest session
-    session <- llamaR:::session_latest(cwd)
+    session <- llamaR:::session_latest()
     if (is.null(session)) {
       cat(sprintf("%sNo sessions found. Starting new session.%s\n", color$dim, color$reset))
     } else {
@@ -537,7 +542,7 @@ run_agent <- function(opts) {
     session <- llamaR:::session_new(opts$provider, opts$model, cwd)
   }
 
-  print_banner(session$id)
+  print_banner(session$sessionKey)
 
   # Start/connect to MCP server
   server_log <- file.path(tempdir(), "llamar-server.log")
@@ -759,11 +764,12 @@ run_agent <- function(opts) {
         cat("\n")
         next
       } else if (cmd == "/clear") {
+        # Clear in-memory messages (transcript preserved on disk)
         session$messages <- list()
         session$tokens <- 0L
         session_tokens <- 0L
         llamaR:::session_save(session)
-        cat(sprintf("%sConversation cleared.%s\n", color$dim, color$reset))
+        cat(sprintf("%sConversation cleared (transcript preserved).%s\n", color$dim, color$reset))
         next
       } else if (cmd == "/compact") {
         if (length(session$messages) < 2) {
@@ -771,9 +777,12 @@ run_agent <- function(opts) {
         } else {
           compact_result <- do_compact(session, provider, display_model, system_prompt)
           if (!is.null(compact_result)) {
+            # Write compaction marker to transcript
+            llamaR:::transcript_compact(session, compact_result$summary)
+
+            # Update in-memory session
             session$messages <- list(
-              list(role = "user", content = "[Previous conversation summary]"),
-              list(role = "assistant", content = compact_result$summary)
+              list(role = "assistant", content = compact_result$summary, type = "compaction")
             )
             session_tokens <- compact_result$tokens
             session$tokens <- session_tokens
@@ -783,7 +792,7 @@ run_agent <- function(opts) {
         }
         next
       } else if (cmd == "/sessions") {
-        sessions <- llamaR:::session_list(cwd)
+        sessions <- llamaR:::session_list()
         cat(llamaR:::format_session_list(sessions), "\n")
         next
       } else if (cmd == "/model" && !is.null(cmd_arg)) {
@@ -969,8 +978,22 @@ Tool output:
       }
     }
 
-    # Add user message to session
+    # Build API history from session BEFORE adding current user message
+    # (agent() adds the prompt itself)
+    # Messages are stored in content-block format, extract text for API
+    api_history <- lapply(session$messages, function(m) {
+      # Extract text from content blocks (pi-coding-agent format)
+      text <- if (is.list(m$content) && length(m$content) > 0 && !is.null(m$content[[1]]$text)) {
+        m$content[[1]]$text
+      } else {
+        m$content  # Fallback for legacy format
+      }
+      list(role = m$role, content = text)
+    })
+
+    # Add user message to session (in-memory) and transcript (disk)
     session <- llamaR:::session_add_message(session, "user", prompt)
+    llamaR:::transcript_append(session, "user", prompt)
     llamaR:::session_save(session)
 
     # Send to LLM with tools
@@ -989,11 +1012,6 @@ Tool output:
         next
       }
     }
-
-    # Strip extra fields from messages for API (only role + content)
-    api_history <- lapply(session$messages, function(m) {
-      list(role = m$role, content = m$content)
-    })
 
     result <- tryCatch({
       agent(
@@ -1029,23 +1047,39 @@ Tool output:
         # Auto-compact if approaching limit
         pct <- (session_tokens / context_limit) * 100
         if (pct >= opts$context_compact_pct && length(session$messages) > 2) {
+          # Add current response before compacting so it's included in summary
+          session <- llamaR:::session_add_message(session, "assistant", result$content)
+          llamaR:::transcript_append(session, "assistant", result$content)
+
           compact_result <- do_compact(session, provider, display_model, system_prompt)
           if (!is.null(compact_result)) {
-            # Replace session with summary
+            # Write compaction marker to transcript (full history preserved)
+            llamaR:::transcript_compact(session, compact_result$summary)
+
+            # Update in-memory session to use summary for next API call
             session$messages <- list(
-              list(role = "user", content = "[Previous conversation summary]"),
-              list(role = "assistant", content = compact_result$summary)
+              list(role = "assistant", content = compact_result$summary, type = "compaction")
             )
             session_tokens <- compact_result$tokens
             session$tokens <- session_tokens
             session$compactions <- (session$compactions %||% 0L) + 1L
+            llamaR:::session_save(session)
+          } else {
+            # Compaction failed, just save metadata
+            llamaR:::session_save(session)
           }
+        } else {
+          # No compaction needed - add assistant response
+          session <- llamaR:::session_add_message(session, "assistant", result$content)
+          llamaR:::transcript_append(session, "assistant", result$content)
+          llamaR:::session_save(session)
         }
+      } else {
+        # No usage info - add assistant response
+        session <- llamaR:::session_add_message(session, "assistant", result$content)
+        llamaR:::transcript_append(session, "assistant", result$content)
+        llamaR:::session_save(session)
       }
-
-      # Add assistant response to session
-      session <- llamaR:::session_add_message(session, "assistant", result$content)
-      llamaR:::session_save(session)
     }
   }
 
