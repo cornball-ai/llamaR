@@ -232,7 +232,7 @@ remotes::install_github("cornball-ai/llamaR")
 llamaR::install_cli()
 
 # Add ~/bin to PATH if needed
-# export PATH="$HOME/bin:$PATH"
+export PATH="$HOME/bin:$PATH"
 ```
 
 ### Required R Packages
