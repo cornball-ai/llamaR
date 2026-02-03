@@ -6,9 +6,8 @@
 #   --provider   anthropic|openai|ollama (default: anthropic)
 #   --model      model name (default: provider-specific)
 #   --port       MCP server port (default: 7850)
-#   --resume   Resume the latest session for this directory
-#   --session    Resume a specific session by ID
-#   --list       List sessions for this directory
+#   --session    Session key (resume if exists, create if not)
+#   --list       List sessions
 #
 
 # Load .Renviron explicitly (littler may not load it automatically)
@@ -40,8 +39,7 @@ parse_args <- function() {
     context_high_pct = config$context_high_pct %||% 90L,
     context_crit_pct = config$context_crit_pct %||% 95L,
     context_compact_pct = config$context_compact_pct %||% 80L,  # Auto-compact threshold
-    resume = FALSE,
-    session = NULL,
+    session = NULL,  # Session key (resume if exists, create if not)
     list = FALSE,
     voice = config$voice$enabled %||% FALSE  # Voice mode
   )
@@ -58,10 +56,7 @@ parse_args <- function() {
     } else if (arg == "--port" && i < length(args)) {
       opts$port <- as.integer(args[i + 1])
       i <- i + 2
-    } else if (arg == "--resume" || arg == "-r") {
-      opts$resume <- TRUE
-      i <- i + 1
-    } else if (arg == "--session" && i < length(args)) {
+    } else if ((arg == "--session" || arg == "-s") && i < length(args)) {
       opts$session <- args[i + 1]
       i <- i + 2
     } else if (arg == "--list") {
@@ -80,23 +75,22 @@ llamar - An open-source interactive CLI agent
 Usage: llamar [options]
 
 Options:
-  --provider   LLM provider: anthropic, openai, ollama (default: anthropic)
-  --model      Model name (default: auto per provider)
-  --port       MCP server port (default: 7850)
-  --tools      Tool filter: core, file, code, git, r, data, web, chat (default: all)
-               Example: --tools core or --tools file,git,code
-  --voice      Start with voice mode enabled
-  --resume     Resume the latest session for this directory
-  --session ID Resume a specific session
-  --list       List sessions for this directory
-  --help       Show this help
+  --provider      LLM provider: anthropic, openai, ollama (default: anthropic)
+  --model         Model name (default: auto per provider)
+  --port          MCP server port (default: 7850)
+  --tools         Tool filter: core, file, code, git, r, data, web, chat (default: all)
+                  Example: --tools core or --tools file,git,code
+  --voice, -v     Start with voice mode enabled
+  --session, -s   Session key (resume if exists, create if not)
+  --list          List sessions
+  --help, -h      Show this help
 
 Commands (in chat):
   /quit, /exit   Exit llamar
   /tools         List available tools
   /clear         Clear conversation (keeps session)
   /compact       Summarize conversation to free context
-  /sessions      List sessions for this directory
+  /sessions      List sessions
   /context       Show loaded context files
   /model <name>  Switch model
   /provider <p>  Switch provider
@@ -516,29 +510,21 @@ run_agent <- function(opts) {
   session <- NULL
 
   if (!is.null(opts$session)) {
-    # Resume specific session (opts$session is session_key)
+    # Try to resume session by key, create if not found
     session <- llamaR:::session_load(opts$session)
     if (is.null(session)) {
-      cat(sprintf("%sSession not found: %s%s\n", color$yellow, opts$session, color$reset))
-      return(invisible(NULL))
-    }
-    # Use session's provider/model unless overridden
-    if (is.null(opts$model)) opts$model <- session$model
-    opts$provider <- session$provider %||% opts$provider
-  } else if (opts$resume) {
-    # Resume latest session
-    session <- llamaR:::session_latest()
-    if (is.null(session)) {
-      cat(sprintf("%sNo sessions found. Starting new session.%s\n", color$dim, color$reset))
+      # Create new session with specified key
+      cat(sprintf("%sCreating session: %s%s\n", color$dim, opts$session, color$reset))
+      session <- llamaR:::session_new(opts$provider, opts$model, cwd, session_key = opts$session)
     } else {
+      # Resuming existing session
+      cat(sprintf("%sResuming session: %s%s\n", color$dim, opts$session, color$reset))
       # Use session's provider/model unless overridden
       if (is.null(opts$model)) opts$model <- session$model
       opts$provider <- session$provider %||% opts$provider
     }
-  }
-
-  # Create new session if needed
-  if (is.null(session)) {
+  } else {
+    # No session key specified - create new session
     session <- llamaR:::session_new(opts$provider, opts$model, cwd)
   }
 
