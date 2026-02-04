@@ -270,9 +270,8 @@ transport_signal <- function(config = list()) {
     text_chunk_limit <- config$textChunkLimit %||% 4000L
     chunk_mode <- config$chunkMode %||% "length"
 
-    # SSE state
-    sse_url <- sprintf("%s/api/v1/events?account=%s",
-        base_url, utils::URLencode(account, reserved = TRUE))
+    # SSE state (no account param needed in single-account mode)
+    sse_url <- sprintf("%s/api/v1/events", base_url)
     running <- FALSE
 
     # Helper: make RPC call with this base_url
@@ -280,11 +279,14 @@ transport_signal <- function(config = list()) {
         signal_rpc_request(base_url, method, params)
     }
 
+    # Reuse a single handle to avoid exhausting curl's connection pool
+    sse_handle <- curl::new_handle()
+
     # Poll SSE for messages
     poll_messages <- function(timeout_secs = 1) {
-        h <- curl::new_handle()
-        curl::handle_setopt(h, timeout = timeout_secs)
-        curl::handle_setheaders(h, "Accept" = "text/event-stream")
+        curl::handle_reset(sse_handle)
+        curl::handle_setopt(sse_handle, timeout = timeout_secs)
+        curl::handle_setheaders(sse_handle, "Accept" = "text/event-stream")
 
         buffer <- ""
         current_event <- list()
@@ -301,9 +303,9 @@ transport_signal <- function(config = list()) {
                         all_messages <<- c(all_messages, result$messages)
 
                         TRUE
-                    }, handle = h)
+                    }, handle = sse_handle)
             }, error = function(e) {
-                if (!grepl("Timeout|timed out", e$message, ignore.case = TRUE)) {
+                if (!grepl("Timeout|timed out|cannot open", e$message, ignore.case = TRUE)) {
                     log_msg("Signal SSE error:", e$message)
                 }
             })
