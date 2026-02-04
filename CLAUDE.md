@@ -2,7 +2,19 @@
 
 A CLI-first AI agent runtime for R. Self-hosted, model-agnostic, tinyverse.
 
+**Goal:** Drop-in replacement for Claude Code - same external interface, different runtime.
+
 **Reference:** ~/openclaw - TypeScript CLI agent we're interoperable with.
+
+## Design Philosophy
+
+llamaR is designed as an **alternative runtime** that can replace Claude Code:
+- Same session format (JSONL transcripts + JSON metadata)
+- Same SKILL.md format for portable skills
+- Same config structure with hierarchical overrides
+- Compatible transport interfaces (terminal, Signal, etc.)
+
+The user should be able to switch between runtimes without losing data or relearning commands.
 
 ## Isomorphism with openclaw
 
@@ -89,7 +101,7 @@ R/
 ├── config.R        # Config file loading (~/.llamar/config.json, .llamar/config.json)
 ├── context.R       # Context file loading (README.md, PLAN.md, fyi.md, etc.)
 ├── log.R           # Structured JSON logging
-├── session.R       # Session persistence (.llamar/sessions/*.json)
+├── session.R       # Session persistence (~/.llamar/agents/main/sessions/)
 ├── skill.R         # Skill system (SKILL.md parsing, registry)
 ├── mcp-handler.R   # JSON-RPC request handling
 ├── mcp-transport.R # Stdio and socket transports
@@ -108,7 +120,7 @@ inst/
 
 | File | Purpose |
 |------|---------|
-| `.llamar/sessions/` | Project-local session storage |
+| `~/.llamar/agents/main/sessions/` | Session storage (transcripts + metadata) |
 | `.llamar/config.json` | Project config (provider, model, context_files) |
 | `~/.llamar/config.json` | Global config defaults |
 | `~/.llamar/workspace/` | Agent workspace (matches openclaw) |
@@ -221,6 +233,71 @@ When using bash-specific features (like `read -e`), explicitly call bash since `
 ```r
 system('bash -c "read -e -p \"> \" input && echo $input"', intern = TRUE)
 ```
+
+### SQL strings: Use paste0() for readability
+
+For SQL strings, `paste0()` is cleaner than multi-line strings:
+```r
+# Preferred - clear structure, easy to edit
+sql <- paste0(
+    "CREATE TABLE IF NOT EXISTS tasks (",
+    "id INTEGER PRIMARY KEY,",
+    "name TEXT NOT NULL)"
+)
+```
+
+Note: A bug in rformat that duplicated multi-line string content was fixed in rformat v0.2.0+. Multi-line strings now work correctly, but `paste0()` is still preferred for SQL because it's easier to read and modify.
+
+## TypeScript to R Porting Notes
+
+Lessons learned from porting openclaw patterns to R:
+
+### Pattern Mapping
+
+| TypeScript | R Equivalent |
+|------------|--------------|
+| `async/await` | Sequential execution (R is synchronous) |
+| `Promise.all()` | `parallel::mclapply()` or sequential loop |
+| `interface Foo {}` | Named list with expected fields |
+| `class Foo` | List + functions, or R6 if needed |
+| `Map<K,V>` | Named list or environment |
+| `null ?? default` | `x %||% default` (null-coalescing) |
+| `?.` optional chaining | `if (!is.null(x)) x$field` |
+| `try/catch` | `tryCatch()` |
+| `JSON.parse/stringify` | `jsonlite::fromJSON/toJSON` |
+
+### Key Differences
+
+1. **No async**: R is single-threaded. Background tasks need `system2(..., wait=FALSE)` or parallel package.
+
+2. **Environments vs objects**: Use `new.env(parent = emptyenv())` for mutable registries:
+   ```r
+   .registry <- new.env(parent = emptyenv())
+   .registry[["key"]] <- value
+   ```
+
+3. **NULL handling**: R's NULL behaves differently than JS null/undefined. Always check with `is.null()`.
+
+4. **List vs vector**: Use `list()` for heterogeneous collections, vectors for homogeneous.
+
+5. **Closures for state**: R closures capture their environment - useful for stateful handlers:
+   ```r
+   make_counter <- function() {
+       count <- 0
+       function() {
+           count <<- count + 1
+           count
+       }
+   }
+   ```
+
+### Common Gotchas
+
+- R has 1-based indexing
+- `if (x)` fails if x is NULL or length-0 - use `if (isTRUE(x))` or `if (length(x) > 0 && x)`
+- `==` doesn't work for NULL comparison - use `is.null()`
+- List subsetting: `list[[1]]` returns element, `list[1]` returns list
+- Named args: R uses `=` not `:` for named arguments
 
 ## Connection Handling
 
