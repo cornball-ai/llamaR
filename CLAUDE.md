@@ -248,6 +248,31 @@ sql <- paste0(
 
 Note: A bug in rformat that duplicated multi-line string content was fixed in rformat v0.2.0+. Multi-line strings now work correctly, but `paste0()` is still preferred for SQL because it's easier to read and modify.
 
+### Empty list() serializes as [] not {}
+
+R's `list()` becomes `[]` in JSON, but APIs (e.g., Anthropic) expect `{}` for empty objects.
+Use `setNames(list(), character(0))` for empty JSON objects:
+```r
+# Wrong - becomes [] in JSON
+properties <- list()
+
+# Right - becomes {} in JSON
+properties <- setNames(list(), character(0))
+```
+
+### Reuse curl handles in loops
+
+Creating a new `curl::new_handle()` per iteration exhausts curl's 128-connection pool.
+Reuse a single handle with `curl::handle_reset()`:
+```r
+h <- curl::new_handle()
+while (TRUE) {
+    curl::handle_reset(h)
+    curl::handle_setopt(h, timeout = 5)
+    curl::curl_fetch_stream(url, callback, handle = h)
+}
+```
+
 ## TypeScript to R Porting Notes
 
 Lessons learned from porting openclaw patterns to R:
@@ -319,6 +344,20 @@ The CLI uses `#!/usr/bin/env Rscript` instead of `#!/usr/bin/env r` because litt
 If `llamar` fails to connect, check for stale server processes:
 ```bash
 pkill -f "llamaR::serve"
+```
+
+The `llamar-signal` bot will reuse whatever is on port 7850 without checking its cwd.
+A stale MCP server from a different project will cause "MCP server closed connection" errors on tool calls.
+
+### llamar-signal is a user-level systemd service
+
+```bash
+# Manage with --user (no sudo)
+systemctl --user status llamar-signal
+systemctl --user restart llamar-signal
+
+# Service file location
+~/.config/systemd/user/llamar-signal.service
 ```
 
 ## Dependencies

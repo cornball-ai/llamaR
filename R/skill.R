@@ -37,6 +37,11 @@ skill_spec <- function (name, description, params = list(), handler) {
             p
         })
 
+    # Ensure empty properties serializes as {} not []
+    if (length(properties) == 0) {
+        properties <- setNames(list(), character(0))
+    }
+
     list(
         name = name,
         description = description,
