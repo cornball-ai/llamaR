@@ -364,17 +364,17 @@ tool_memory_get <- function(args) {
     workspace <- get_workspace_dir()
 
     # Security: only allow MEMORY.md or files under memory/ within workspace
-    # Normalize to prevent traversal
-    full_path <- normalizePath(file.path(workspace, path), mustWork = FALSE)
-    if (!startsWith(full_path, normalizePath(workspace, mustWork = FALSE))) {
+    # Validate relative path first (no traversal)
+    if (grepl("\\.\\.", path)) {
         return(err("Access denied: path must be within workspace"))
     }
 
     # Only allow MEMORY.md or memory/*.md
-    rel <- sub(paste0("^", normalizePath(workspace, mustWork = FALSE), "/?"), "", full_path)
-    if (rel != "MEMORY.md" && !grepl("^memory/", rel)) {
+    if (path != "MEMORY.md" && !grepl("^memory/", path)) {
         return(err("Access denied: only MEMORY.md or memory/*.md files allowed"))
     }
+
+    full_path <- file.path(workspace, path)
 
     if (!file.exists(full_path)) {
         return(err(paste("File not found:", path)))
