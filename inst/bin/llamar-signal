@@ -256,6 +256,16 @@ run_signal_bot <- function (opts) {
         )
 
         for (msg in msgs) {
+            # Skip messages from self (prevents loops)
+            if (identical(msg$sender, opts$account)) next
+
+            # Skip empty messages and receipts
+            if (is.null(msg$text) || nchar(trimws(msg$text)) == 0) next
+
+            # Skip non-message types (receipts, typing indicators)
+            msg_type <- msg$metadata$type
+            if (!is.null(msg_type) && msg_type %in% c("receipt", "typing", "reaction")) next
+
             log_msg(color$cyan, msg$sender, color$reset, ": ", msg$text)
 
             # Send typing indicator

@@ -28,7 +28,6 @@ Get the fundamental agent cycle working.
 - [x] Anthropic support (Claude)
 - [x] OpenAI support
 - [x] **Ollama support** — priority for local inference
-- [ ] ~~Streaming responses~~ (not needed for agent loop)
 - [x] Tool/function calling interface
 
 ### 1.3 CLI Agent (`llamar`)
@@ -38,9 +37,8 @@ Get the fundamental agent cycle working.
 - [x] Clean exit handling
 
 ### 1.4 File Operations
-- [x] `read_file()` / `write_file()` / `list_files()`
+- [x] `read_file()` / `write_file()` / `list_files()` / `grep_files()`
 - [x] Working directory awareness
-- [ ] ~~Path safety (no escaping workspace)~~ (LLM asks for permission - good UX)
 
 ---
 
@@ -50,10 +48,11 @@ Make llamaR speak the protocol.
 
 ### 2.1 MCP Server
 - [x] `llamaR::serve()` — expose tools via MCP
-- [x] JSON-RPC over stdio
+- [x] JSON-RPC over stdio and TCP socket
 - [x] Tool discovery (`tools/list`)
 - [x] Tool invocation (`tools/call`)
 - [x] Works with Claude Desktop, Claude Code
+- [x] Tool category filtering (`--tools core`, `--tools file,git`)
 
 ### 2.2 MCP Client (in llm.api)
 - [x] `mcp_connect()` — connect to external MCP servers
@@ -61,70 +60,85 @@ Make llamaR speak the protocol.
 - [x] Tool call forwarding
 - [ ] Aggregate tools from multiple servers
 
-### 2.3 Skill System (fyi)
-- [ ] Skill = directory with `SKILL.md` + R functions
-- [ ] `fyi::register_skill()` — load a skill
-- [ ] `fyi::list_skills()` — discover available skills
-- [ ] Skills export MCP-compatible tool definitions
-- [ ] Copy-paste install from community skills
+### 2.3 Skill System ✅
+- [x] SKILL.md format — portable skill definitions
+- [x] `register_skill()` / `list_skills()` — skill registry
+- [x] Skills export MCP-compatible tool definitions
+- [x] Built-in R skills registered on server startup
+- [x] User skills loaded from `~/.llamar/skills/` and `.llamar/skills/`
+- [x] `/skill install`, `/skill remove`, `/skill test` — CLI management
+- [x] Skill docs loaded into system prompt context
 
 ---
 
-## Phase 3: Context & Memory
+## Phase 3: Context & Memory ✅
 
 Make the agent remember.
 
 ### 3.1 Conversation Persistence ✅
-- [x] Save/load conversation history (JSON)
-- [x] Session IDs (date + random hex)
-- [x] `llamar --continue` to resume latest session
-- [x] `llamar --session <id>` to resume specific session
+- [x] JSONL transcripts + JSON metadata (openclaw-compatible)
+- [x] Session IDs (UUID format)
+- [x] `llamar --session <key>` to create or resume
 - [x] `llamar --list` / `/sessions` to list sessions
-- [x] Project-local storage (`.llamar/sessions/`)
+- [x] Global storage (`~/.llamar/agents/main/sessions/`)
+- [x] Tool execution trace per session
 
 ### 3.2 Context Injection ✅
-- [x] `LLAMAR.md` — project-level instructions
-- [x] `fyi.md` — package/project introspection
-- [x] `AGENTS.md` — agent behavior guidelines
+- [x] Global context: SOUL.md, USER.md, MEMORY.md from `~/.llamar/workspace/`
+- [x] Project context: README.md, PLAN.md, fyi.md, AGENTS.md
 - [x] Auto-load on startup, inject as system prompt
 - [x] `/context` command to show loaded files
+- [x] Configurable via `context_files` in config
 
-### 3.3 Long-term Memory (later)
-- [ ] User facts/preferences (Markdown or SQLite)
-- [ ] RAG over past conversations
-- [ ] Explicit `remember` / `forget` commands
+### 3.3 Long-term Memory ✅
+- [x] `/remember` with tags and auto-categorization
+- [x] `/recall` with keyword and tag search
+- [x] Project-scoped (`<cwd>/.llamar/MEMORY.md`) and global (`~/.llamar/workspace/MEMORY.md`)
+- [x] Daily memory logs (`~/.llamar/workspace/memory/YYYY-MM-DD.md`)
+- [x] `/flush` — manual memory flush to daily logs
+- [x] Pre-compaction auto-flush
+- [x] SQLite FTS5 memory index
+- [x] Claude Code session import (`memory_import_claude`)
+- [ ] Auto-inject relevant memories into context (RAG)
+
+### 3.4 Context Compaction ✅
+- [x] `/compact` — manual conversation summarization
+- [x] Auto-compact when context usage exceeds threshold (default 80%)
+- [x] Context usage tracking with color-coded indicator
+- [x] Configurable thresholds (`context_warn_pct`, `context_high_pct`, etc.)
 
 ---
 
-## Phase 4: Channels (SLOW)
+## Phase 4: Channels
 
 Messaging integrations. Personal use first.
 
-### 4.1 Signal
-- [ ] signal-cli integration
-- [ ] Inbound message handling
-- [ ] Outbound replies
-- [ ] Allowlist for senders
+### 4.1 Signal ✅
+- [x] signal-cli integration (`llamar-signal`)
+- [x] Inbound message handling
+- [x] Outbound replies
+- [x] Allowlist for senders
 
 ### 4.2 iMessage (macOS only)
 - [ ] AppleScript or `imessage-cli` bridge
 - [ ] Same inbound/outbound pattern
-- [ ] Group handling (if needed)
 
 ### 4.3 Future Channels
-- Telegram (grammY or bot API)
-- Discord (later)
-- Slack (later)
+- [ ] Telegram
+- [ ] Discord
+- [ ] Slack
 
 ---
 
-## Phase 5: Proactive Behavior (DELIBERATE)
+## Phase 5: Proactive Behavior
 
 Let the agent initiate. Earn trust first.
 
-### 5.1 Scheduled Tasks
-- [ ] Cron-like scheduling
-- [ ] Daily summaries
+### 5.1 Scheduled Tasks ✅
+- [x] SQLite-backed task storage (`R/task.R`)
+- [x] Cron-like scheduling (`R/scheduler.R`)
+- [x] `/task` CLI commands (add, run, pause, resume, delete, list)
+- [ ] Built-in daily summary task
 - [ ] Reminder system
 
 ### 5.2 Event Triggers
@@ -132,69 +146,83 @@ Let the agent initiate. Earn trust first.
 - [ ] Webhook endpoints
 - [ ] Email (Gmail Pub/Sub pattern)
 
-### 5.3 Autonomous Actions
-- [ ] Gated by explicit user approval
-- [ ] Audit log of actions taken
-- [ ] Kill switch
+### 5.3 Autonomous Actions (partial)
+- [x] Tool approval gate (allow once / allow always / deny)
+- [x] Project-local approval persistence (`.llamar/approvals.json`)
+- [x] Tool execution trace with timing and approval audit
+- [x] Dry-run mode (`/dryrun`, `--dry-run`)
+- [ ] Kill switch for background tasks
 
 ---
 
-## Architecture Notes
+## Phase 6: Subagents ✅
+
+Parallel work via child agent processes.
+
+- [x] `subagent_spawn()` — fork agent for a task
+- [x] `subagent_query()` — send prompts to running subagent
+- [x] `subagent_kill()` — terminate subagent
+- [x] `/spawn`, `/agents`, `/ask`, `/kill` CLI commands
+- [x] MCP tools: `spawn_subagent`, `query_subagent`
+
+---
+
+## Phase 7: Voice Mode ✅
+
+Speech input/output via local TTS/STT servers.
+
+- [x] STT integration (stt.api) — record and transcribe
+- [x] TTS integration (tts.api) — speak responses
+- [x] `/voice` toggle and `--voice` flag
+- [x] Configurable via `voice` section in config
+
+---
+
+## Phase 8: Operational
+
+### 8.1 Rate Limiting ✅
+- [x] Token bucket rate limiter (`R/rate-limit.R`)
+
+### 8.2 Remaining Work
+- [ ] Aggregate tools from multiple MCP servers (Phase 2.2)
+- [ ] Auto-inject relevant memories into context via RAG (Phase 3.3)
+- [ ] Built-in scheduled tasks (daily summary, reminders)
+- [ ] Event triggers (file watchers, webhooks)
+- [ ] Kill switch for autonomous background tasks
+
+---
+
+## Architecture
 
 ```
-User (terminal)
+User (terminal / Signal / voice)
      │
      ▼
 ┌─────────────────┐
-│  llamar CLI     │  ← interactive agent
+│  llamar CLI     │  ← inst/bin/llamar (Rscript shebang)
 └────────┬────────┘
          │
-         ▼
-┌─────────────────┐
-│  llm.api        │  ← model-agnostic LLM calls
-└────────┬────────┘
+         ├── llm.api (provider abstraction)
+         │      ├── Anthropic
+         │      ├── OpenAI
+         │      └── Ollama
          │
-         ├── Anthropic
-         ├── OpenAI
-         └── Ollama (local)
-
-┌─────────────────┐
-│  llamaR (MCP)   │  ← R tools exposed via MCP
-└────────┬────────┘
-         │
-         ├── run_r
-         ├── r_help
-         ├── file ops
-         └── fyi skills
+         └── llamaR MCP Server (port 7850)
+                ├── File tools (read/write/list/grep)
+                ├── R tools (run_r, r_help, installed_packages)
+                ├── System tools (bash, git_*)
+                ├── Web tools (web_search, fetch_url)
+                ├── Chat tools (chat, chat_models via llm.api)
+                ├── Memory tools (memory_store, memory_recall, memory_get)
+                └── Subagent tools (spawn, query)
 ```
 
 ---
 
 ## Non-Goals (for now)
 
-- Shiny UI
+- Shiny UI (beyond voice demo)
 - RStudio integration
 - Cloud deployment
 - Multi-user / auth
 - Paid API wrappers
-
----
-
-## Open Questions
-
-1. **Session isolation** — one R session per conversation, or shared?
-2. **Skill format** — match MCP tool schema exactly, or R-native with adapter?
-3. **Memory format** — Markdown (human-readable) vs SQLite (queryable)?
-4. **Channel security** — allowlist-only, or pairing codes like moltbot?
-
----
-
-## Next Actions
-
-1. ~~Get `llamar` CLI loop working with Ollama~~ ✅
-2. ~~Implement core R tools (run_r, r_help, file ops)~~ ✅
-3. ~~Test MCP server mode with Claude Desktop~~ ✅
-4. ~~Implement session persistence~~ ✅
-5. ~~Add context injection (fyi.md, LLAMAR.md, AGENTS.md)~~ ✅
-6. Document skill format for fyi (2.3)
-7. Add long-term memory (3.3)
