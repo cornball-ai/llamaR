@@ -43,6 +43,12 @@ load_context <- function (cwd = getwd()) {
         }
     }
 
+    # Load daily memory logs from ~/.llamar/workspace/memory/*.md
+    memory_logs <- memory_log_load_all()
+    if (!is.null(memory_logs)) {
+        parts <- c(parts, "## Daily Memory Logs", "", memory_logs, "")
+    }
+
     # Read existing project files
     contents <- list()
     for (f in context_files) {

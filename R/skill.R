@@ -58,9 +58,11 @@ skill_spec <- function (name, description, params = list(), handler) {
 #' @param args Named list of arguments
 #' @param ctx Context list (cwd, session, config, etc.)
 #' @param timeout Timeout in seconds (default 30, NULL for no timeout)
+#' @param dry_run If TRUE, validate only without executing (default FALSE)
 #' @return Result from handler (should be ok() or err())
 #' @noRd
-skill_run <- function (skill, args, ctx = list(), timeout = 30L) {
+skill_run <- function (skill, args, ctx = list(), timeout = 30L,
+                       dry_run = FALSE) {
     args <- args %||% list()
     start_time <- Sys.time()
 
@@ -76,6 +78,21 @@ skill_run <- function (skill, args, ctx = list(), timeout = 30L) {
             log_tool_result(skill$name, success = FALSE, elapsed_ms = 0)
             return(result)
         }
+    }
+
+    # Validate parameter types (basic type checking)
+    validation_result <- validate_skill_args(skill, args)
+    if (!validation_result$ok) {
+        result <- err(validation_result$message)
+        log_tool_result(skill$name, success = FALSE, elapsed_ms = 0)
+        return(result)
+    }
+
+    # Dry-run mode: return what would happen without executing
+    if (isTRUE(dry_run)) {
+        preview <- format_dry_run_preview(skill, args)
+        log_event("dry_run", tool = skill$name, args = args, level = "info")
+        return(ok(preview))
     }
 
     # Execute with optional timeout
@@ -115,7 +132,154 @@ skill_run <- function (skill, args, ctx = list(), timeout = 30L) {
     log_tool_result(skill$name, success = success, result_lines = result_lines,
         elapsed_ms = round(elapsed_ms))
 
+    # Add trace entry if session context available
+    if (!is.null(ctx$session_id)) {
+        result_text <- if (!is.null(result$content[[1]]$text)) {
+            result$content[[1]]$text
+        } else {
+            ""
+        }
+        trace_add(
+            session_id = ctx$session_id,
+            tool = skill$name,
+            args = args,
+            result = result_text,
+            success = success,
+            elapsed_ms = round(elapsed_ms),
+            approved_by = ctx$approved_by,
+            turn = ctx$turn,
+            agent_id = ctx$agent_id %||% "main"
+        )
+    }
+
     result
+}
+
+#' Validate skill arguments against schema
+#'
+#' Basic type validation for skill parameters.
+#'
+#' @param skill Skill spec
+#' @param args Arguments to validate
+#' @return List with ok (logical) and message (character if error)
+#' @noRd
+validate_skill_args <- function (skill, args) {
+    props <- skill$inputSchema$properties
+    if (is.null(props) || length(props) == 0) {
+        return(list(ok = TRUE))
+    }
+
+    for (name in names(args)) {
+        if (!name %in% names(props)) {
+            # Unknown param - allow for flexibility
+            next
+        }
+
+        prop <- props[[name]]
+        value <- args[[name]]
+        expected_type <- prop$type
+
+        # Check enum constraint
+        if (!is.null(prop$enum) && !value %in% prop$enum) {
+            return(list(
+                    ok = FALSE,
+                    message = sprintf("Parameter '%s' must be one of: %s",
+                        name, paste(prop$enum, collapse = ", "))
+                ))
+        }
+
+        # Basic type checking
+        type_ok <- switch(expected_type,
+            "string" = is.character(value),
+            "integer" = is.numeric(value) && (is.integer(value) || value == as.integer(value)),
+            "number" = is.numeric(value),
+            "boolean" = is.logical(value),
+            "array" = is.list(value) || is.vector(value),
+            "object" = is.list(value),
+            TRUE# Unknown type, allow
+        )
+
+        if (!type_ok) {
+            return(list(
+                    ok = FALSE,
+                    message = sprintf("Parameter '%s' should be %s, got %s",
+                        name, expected_type, class(value)[1])
+                ))
+        }
+    }
+
+    list(ok = TRUE)
+}
+
+#' Format dry-run preview
+#'
+#' Creates a human-readable preview of what a skill would do.
+#'
+#' @param skill Skill spec
+#' @param args Arguments
+#' @return Character string preview
+#' @noRd
+format_dry_run_preview <- function (skill, args) {
+    lines <- c(
+        sprintf("[DRY RUN] Would execute: %s", skill$name),
+        sprintf("Description: %s", skill$description)
+    )
+
+    if (length(args) > 0) {
+        lines <- c(lines, "Arguments:")
+        for (name in names(args)) {
+            value <- args[[name]]
+            value_str <- if (is.character(value) && nchar(value) > 100) {
+                paste0(substr(value, 1, 97), "...")
+            } else {
+                as.character(value)
+            }
+            lines <- c(lines, sprintf("  %s: %s", name, value_str))
+        }
+    }
+
+    # Add skill-specific preview hints based on tool name
+    preview_hint <- get_dry_run_hint(skill$name, args)
+    if (!is.null(preview_hint)) {
+        lines <- c(lines, "", "Preview:", preview_hint)
+    }
+
+    paste(lines, collapse = "\n")
+}
+
+#' Get dry-run hint for specific tools
+#'
+#' Provides tool-specific preview information.
+#'
+#' @param tool_name Tool name
+#' @param args Tool arguments
+#' @return Preview hint string or NULL
+#' @noRd
+get_dry_run_hint <- function (tool_name, args) {
+    switch(tool_name,
+        "write_file" = {
+            if (!is.null(args$path)) {
+                sprintf("Would write %d chars to: %s",
+                    nchar(args$content %||% ""), args$path)
+            }
+        },
+        "bash" = {
+            if (!is.null(args$command)) {
+                sprintf("Would execute shell command: %s", args$command)
+            }
+        },
+        "run_r" = {
+            if (!is.null(args$code)) {
+                code_preview <- if (nchar(args$code) > 200) {
+                    paste0(substr(args$code, 1, 197), "...")
+                } else {
+                    args$code
+                }
+                sprintf("Would execute R code:\n%s", code_preview)
+            }
+        },
+        NULL
+    )
 }
 
 #' Register a skill in the global registry
@@ -222,14 +386,16 @@ skills_as_tools <- function () {
 #' @param args Named list of arguments
 #' @param ctx Context list
 #' @param timeout Timeout in seconds
+#' @param dry_run If TRUE, validate only without executing
 #' @return Result from skill handler
 #' @noRd
-call_skill <- function (name, args, ctx = list(), timeout = 30L) {
+call_skill <- function (name, args, ctx = list(), timeout = 30L,
+                        dry_run = FALSE) {
     skill <- get_skill(name)
     if (is.null(skill)) {
         return(err(paste("Unknown skill:", name)))
     }
-    skill_run(skill, args, ctx, timeout)
+    skill_run(skill, args, ctx, timeout, dry_run)
 }
 
 # SKILL.md Support ----
@@ -447,5 +613,338 @@ format_skill_docs <- function(names = NULL) {
     }
 
     paste(parts, collapse = "\n")
+}
+
+# ============================================================================
+# Skill Packaging
+# ============================================================================
+
+#' Parse SKILL.json metadata file
+#'
+#' @param path Path to SKILL.json
+#' @return List with skill metadata, or NULL on error
+#' @noRd
+parse_skill_json <- function(path) {
+    if (!file.exists(path)) {
+        return(NULL)
+    }
+
+    tryCatch({
+            meta <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+
+            list(
+                name = meta$name %||% basename(dirname(path)),
+                version = meta$version %||% "0.0.0",
+                schema_version = meta$schema_version %||% "1",
+                description = meta$description %||% "",
+                tools = meta$tools %||% list(),
+                dependencies = meta$dependencies %||% list(),
+                author = meta$author,
+                license = meta$license
+            )
+        }, error = function(e) {
+            warning(sprintf("Failed to parse SKILL.json at %s: %s", path, e$message))
+            NULL
+        })
+}
+
+#' Validate a skill package
+#'
+#' Checks that a skill directory has required files and valid structure.
+#'
+#' @param path Path to skill directory
+#' @return List with valid (logical), errors (character vector)
+#' @noRd
+validate_skill_package <- function(path) {
+    errors <- character()
+
+    if (!dir.exists(path)) {
+        return(list(valid = FALSE, errors = "Directory does not exist"))
+    }
+
+    # Check for SKILL.json or SKILL.md
+    has_json <- file.exists(file.path(path, "SKILL.json"))
+    has_md <- file.exists(file.path(path, "SKILL.md"))
+
+    if (!has_json && !has_md) {
+        errors <- c(errors, "Missing SKILL.json or SKILL.md")
+    }
+
+    # If has SKILL.json, validate it
+    if (has_json) {
+        meta <- parse_skill_json(file.path(path, "SKILL.json"))
+        if (is.null(meta)) {
+            errors <- c(errors, "Invalid SKILL.json")
+        } else {
+            if (is.null(meta$name) || nchar(meta$name) == 0) {
+                errors <- c(errors, "SKILL.json missing 'name' field")
+            }
+        }
+    }
+
+    # Check for skill.R (optional but recommended)
+    if (!file.exists(file.path(path, "skill.R")) && has_json) {
+        # SKILL.json implies R handlers expected
+        if (length(errors) == 0) {
+            # Just a warning, not an error
+        }
+    }
+
+    list(
+        valid = length(errors) == 0,
+        errors = errors
+    )
+}
+
+#' Install a skill from a path or URL
+#'
+#' @param source Path to skill directory or URL
+#' @param target_dir Installation directory (default: ~/.llamar/skills)
+#' @param force Overwrite if exists
+#' @return Installed skill name
+#' @export
+skill_install <- function(source, target_dir = NULL, force = FALSE) {
+    if (is.null(target_dir)) {
+        target_dir <- file.path(get_workspace_dir(), "..", "skills")
+    }
+    target_dir <- path.expand(target_dir)
+    dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+
+    # Handle URL (git clone or download)
+    if (grepl("^https?://", source)) {
+        # For GitHub URLs, try git clone
+        if (grepl("github.com", source)) {
+            temp_dir <- tempfile("skill_")
+            result <- system2("git", c("clone", "--depth", "1", source, temp_dir),
+                stdout = TRUE, stderr = TRUE)
+            if (!dir.exists(temp_dir)) {
+                stop("Failed to clone repository: ", paste(result, collapse = "\n"),
+                    call. = FALSE)
+            }
+            source <- temp_dir
+        } else {
+            stop("URL installation only supported for GitHub repositories",
+                call. = FALSE)
+        }
+    }
+
+    source <- path.expand(source)
+
+    # Validate source
+    validation <- validate_skill_package(source)
+    if (!validation$valid) {
+        stop("Invalid skill package: ", paste(validation$errors, collapse = "; "),
+            call. = FALSE)
+    }
+
+    # Get skill name
+    meta_path <- file.path(source, "SKILL.json")
+    if (file.exists(meta_path)) {
+        meta <- parse_skill_json(meta_path)
+        skill_name <- meta$name
+    } else {
+        skill_name <- basename(source)
+    }
+
+    # Check if already installed
+    dest <- file.path(target_dir, skill_name)
+    if (dir.exists(dest)) {
+        if (!force) {
+            stop("Skill '", skill_name, "' already installed. Use force=TRUE to overwrite.",
+                call. = FALSE)
+        }
+        unlink(dest, recursive = TRUE)
+    }
+
+    # Copy to target
+    dir.create(dest, recursive = TRUE)
+    files <- list.files(source, full.names = TRUE, all.files = TRUE)
+    files <- files[!basename(files) %in% c(".", "..")]
+    file.copy(files, dest, recursive = TRUE)
+
+    log_event("skill_install", skill = skill_name, source = source)
+
+    skill_name
+}
+
+#' Remove an installed skill
+#'
+#' @param name Skill name
+#' @param skill_dir Skills directory
+#' @return Invisible TRUE on success
+#' @export
+skill_remove <- function(name, skill_dir = NULL) {
+    if (is.null(skill_dir)) {
+        skill_dir <- file.path(get_workspace_dir(), "..", "skills")
+    }
+    skill_dir <- path.expand(skill_dir)
+
+    path <- file.path(skill_dir, name)
+    if (!dir.exists(path)) {
+        stop("Skill not found: ", name, call. = FALSE)
+    }
+
+    unlink(path, recursive = TRUE)
+
+    # Clear from registries
+    if (exists(name, envir = .skill_registry, inherits = FALSE)) {
+        rm(list = name, envir = .skill_registry)
+    }
+    if (exists(name, envir = .skill_docs, inherits = FALSE)) {
+        rm(list = name, envir = .skill_docs)
+    }
+
+    log_event("skill_remove", skill = name)
+
+    invisible(TRUE)
+}
+
+#' List installed skills
+#'
+#' @param skill_dir Skills directory
+#' @return Data frame with skill info
+#' @export
+skill_list_installed <- function(skill_dir = NULL) {
+    if (is.null(skill_dir)) {
+        skill_dir <- file.path(get_workspace_dir(), "..", "skills")
+    }
+    skill_dir <- path.expand(skill_dir)
+
+    if (!dir.exists(skill_dir)) {
+        return(data.frame(
+                name = character(),
+                version = character(),
+                description = character(),
+                stringsAsFactors = FALSE
+            ))
+    }
+
+    dirs <- list.dirs(skill_dir, recursive = FALSE, full.names = TRUE)
+
+    skills <- lapply(dirs, function(d) {
+            json_path <- file.path(d, "SKILL.json")
+            md_path <- file.path(d, "SKILL.md")
+
+            if (file.exists(json_path)) {
+                meta <- parse_skill_json(json_path)
+                if (!is.null(meta)) {
+                    return(data.frame(
+                            name = meta$name,
+                            version = meta$version,
+                            description = substr(meta$description, 1, 50),
+                            stringsAsFactors = FALSE
+                        ))
+                }
+            }
+
+            if (file.exists(md_path)) {
+                skill <- parse_skill_md(md_path)
+                if (!is.null(skill)) {
+                    return(data.frame(
+                            name = skill$name,
+                            version = "md",
+                            description = substr(skill$description, 1, 50),
+                            stringsAsFactors = FALSE
+                        ))
+                }
+            }
+
+            # Directory without valid skill files
+            NULL
+        })
+
+    skills <- Filter(Negate(is.null), skills)
+
+    if (length(skills) == 0) {
+        return(data.frame(
+                name = character(),
+                version = character(),
+                description = character(),
+                stringsAsFactors = FALSE
+            ))
+    }
+
+    do.call(rbind, skills)
+}
+
+#' Run skill tests
+#'
+#' Executes test_*.R files in a skill directory.
+#'
+#' @param path Path to skill directory
+#' @param verbose Print test output
+#' @return List with passed, failed, errors
+#' @export
+skill_test <- function(path, verbose = TRUE) {
+    path <- path.expand(path)
+
+    if (!dir.exists(path)) {
+        stop("Skill directory not found: ", path, call. = FALSE)
+    }
+
+    test_files <- Sys.glob(file.path(path, "test_*.R"))
+
+    if (length(test_files) == 0) {
+        if (verbose) message("No test files found")
+        return(list(passed = 0L, failed = 0L, errors = character()))
+    }
+
+    if (verbose) message(sprintf("Running %d test file(s)...", length(test_files)))
+
+    passed <- 0L
+    failed <- 0L
+    errors <- character()
+
+    for (tf in test_files) {
+        if (verbose) message(sprintf("  %s", basename(tf)))
+
+        result <- tryCatch({
+                source(tf, local = TRUE)
+                list(ok = TRUE)
+            }, error = function(e) {
+                list(ok = FALSE, error = e$message)
+            })
+
+        if (result$ok) {
+            passed <- passed + 1L
+        } else {
+            failed <- failed + 1L
+            errors <- c(errors, sprintf("%s: %s", basename(tf), result$error))
+        }
+    }
+
+    if (verbose) {
+        if (failed == 0) {
+            message(sprintf("All %d test(s) passed", passed))
+        } else {
+            message(sprintf("%d passed, %d failed", passed, failed))
+            for (e in errors) {
+                message(sprintf("  Error: %s", e))
+            }
+        }
+    }
+
+    list(passed = passed, failed = failed, errors = errors)
+}
+
+#' Format installed skills for display
+#'
+#' @param skills Data frame from skill_list_installed()
+#' @return Character string for display
+#' @noRd
+format_skill_list <- function(skills) {
+    if (nrow(skills) == 0) {
+        return("No skills installed.")
+    }
+
+    lines <- c("Installed skills:")
+
+    for (i in seq_len(nrow(skills))) {
+        s <- skills[i,]
+        lines <- c(lines, sprintf("  %s (v%s) - %s",
+                s$name, s$version, s$description))
+    }
+
+    paste(lines, collapse = "\n")
 }
 

@@ -317,76 +317,158 @@ format_memory_results <- function(results) {
 }
 
 # ============================================================================
-# DuckDB-based Memory Index
+# Daily Memory Logs
+# ============================================================================
+
+#' Get daily memory log directory
+#'
+#' @return Path to memory log directory (~/.llamar/workspace/memory/)
+#' @noRd
+memory_log_dir <- function() {
+    dir <- file.path(get_workspace_dir(), "memory")
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    dir
+}
+
+#' Get path to daily memory log
+#'
+#' @param date Date (default: today)
+#' @return Path to memory/YYYY-MM-DD.md
+#' @noRd
+memory_log_path <- function(date = Sys.Date()) {
+    file.path(memory_log_dir(), sprintf("%s.md", format(date, "%Y-%m-%d")))
+}
+
+#' Write content to daily memory log
+#'
+#' Appends to the daily log, creating with header if new.
+#'
+#' @param content Text to append
+#' @param date Date (default: today)
+#' @return Invisible path to log file
+#' @noRd
+memory_log_write <- function(content, date = Sys.Date()) {
+    path <- memory_log_path(date)
+
+    if (!file.exists(path)) {
+        header <- sprintf("# Memory Log: %s\n", format(date, "%Y-%m-%d"))
+        writeLines(header, path)
+    }
+
+    cat(content, "\n", file = path, append = TRUE, sep = "")
+    invisible(path)
+}
+
+#' List all daily memory logs
+#'
+#' @return Character vector of YYYY-MM-DD.md file paths, sorted newest-first
+#' @noRd
+memory_log_list <- function() {
+    dir <- memory_log_dir()
+    files <- list.files(dir, pattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.md$",
+        full.names = TRUE)
+    sort(files, decreasing = TRUE)
+}
+
+#' Load all daily memory logs
+#'
+#' @return Single string with all logs concatenated, or NULL if none
+#' @noRd
+memory_log_load_all <- function() {
+    files <- memory_log_list()
+    if (length(files) == 0) return(NULL)
+
+    parts <- character()
+    for (f in files) {
+        content <- paste(readLines(f, warn = FALSE), collapse = "\n")
+        if (nchar(trimws(content)) > 0) {
+            parts <- c(parts, content, "")
+        }
+    }
+
+    if (length(parts) == 0) return(NULL)
+    paste(parts, collapse = "\n")
+}
+
+# ============================================================================
+# SQLite-based Memory Index
 # ============================================================================
 
 #' Get path to memory database
 #'
 #' @param agent_id Agent identifier (default: "default")
-#' @return Path to DuckDB file
+#' @return Path to SQLite file
 #' @noRd
 memory_db_path <- function(agent_id = "default") {
     dir <- file.path(get_workspace_dir(), "memory")
     dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-    file.path(dir, sprintf("%s.duckdb", agent_id))
+    file.path(dir, sprintf("%s.sqlite", agent_id))
 }
 
 #' Initialize memory database schema
 #'
-#' Creates tables if they don't exist.
+#' Creates tables and FTS5 virtual table if they don't exist.
 #'
-#' @param con DuckDB connection
+#' @param con SQLite connection
 #' @return Invisible NULL
 #' @noRd
 memory_db_init_schema <- function(con) {
     # Metadata table
-    DBI::dbExecute(con, "
-        CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-    ")
+    sql_meta <- paste0(
+        "CREATE TABLE IF NOT EXISTS meta (",
+        "key TEXT PRIMARY KEY,",
+        "value TEXT NOT NULL)")
+    DBI::dbExecute(con, sql_meta)
 
     # Files table - tracks what's indexed
-    DBI::dbExecute(con, "
-        CREATE TABLE IF NOT EXISTS files (
-            path TEXT PRIMARY KEY,
-            source TEXT NOT NULL DEFAULT 'memory',
-            hash TEXT NOT NULL,
-            mtime BIGINT NOT NULL,
-            size BIGINT NOT NULL,
-            indexed_at BIGINT NOT NULL
-        )
-    ")
+    sql_files <- paste0(
+        "CREATE TABLE IF NOT EXISTS files (",
+        "path TEXT PRIMARY KEY,",
+        "source TEXT NOT NULL DEFAULT 'memory',",
+        "hash TEXT NOT NULL,",
+        "mtime INTEGER NOT NULL,",
+        "size INTEGER NOT NULL,",
+        "indexed_at INTEGER NOT NULL)")
+    DBI::dbExecute(con, sql_files)
 
-    # Chunks table - text chunks with optional embeddings
-    DBI::dbExecute(con, "
-        CREATE TABLE IF NOT EXISTS chunks (
-            id TEXT PRIMARY KEY,
-            path TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'memory',
-            start_line INTEGER NOT NULL,
-            end_line INTEGER NOT NULL,
-            hash TEXT NOT NULL,
-            text TEXT NOT NULL,
-            embedding DOUBLE[],
-            embedding_model TEXT,
-            updated_at BIGINT NOT NULL
-        )
-    ")
+    # Chunks table - text chunks (no embedding columns)
+    sql_chunks <- paste0(
+        "CREATE TABLE IF NOT EXISTS chunks (",
+        "id TEXT PRIMARY KEY,",
+        "path TEXT NOT NULL,",
+        "source TEXT NOT NULL DEFAULT 'memory',",
+        "start_line INTEGER NOT NULL,",
+        "end_line INTEGER NOT NULL,",
+        "hash TEXT NOT NULL,",
+        "text TEXT NOT NULL,",
+        "updated_at INTEGER NOT NULL)")
+    DBI::dbExecute(con, sql_chunks)
 
-    # Create FTS index if not exists
+    # FTS5 virtual table for full-text search
     tryCatch({
-        DBI::dbExecute(con, "INSTALL fts")
-        DBI::dbExecute(con, "LOAD fts")
-        DBI::dbExecute(con, "
-            PRAGMA create_fts_index('chunks', 'id', 'text',
-                stemmer = 'english',
-                stopwords = 'english',
-                overwrite = 1)
-        ")
+        DBI::dbExecute(con, paste0(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts ",
+            "USING fts5(id, text, content=chunks, content_rowid=rowid)"))
+
+        # Auto-sync triggers: keep chunks_fts in sync with chunks
+        DBI::dbExecute(con, paste0(
+            "CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN ",
+            "INSERT INTO chunks_fts(rowid, id, text) ",
+            "VALUES (new.rowid, new.id, new.text); END"))
+
+        DBI::dbExecute(con, paste0(
+            "CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN ",
+            "INSERT INTO chunks_fts(chunks_fts, rowid, id, text) ",
+            "VALUES('delete', old.rowid, old.id, old.text); END"))
+
+        DBI::dbExecute(con, paste0(
+            "CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN ",
+            "INSERT INTO chunks_fts(chunks_fts, rowid, id, text) ",
+            "VALUES('delete', old.rowid, old.id, old.text); ",
+            "INSERT INTO chunks_fts(rowid, id, text) ",
+            "VALUES (new.rowid, new.id, new.text); END"))
     }, error = function(e) {
-        log_msg("FTS index creation failed:", e$message)
+        log_msg("FTS5 index creation failed:", e$message)
     })
 
     invisible(NULL)
@@ -395,16 +477,16 @@ memory_db_init_schema <- function(con) {
 #' Open memory database connection
 #'
 #' @param agent_id Agent identifier
-#' @param read_only Open in read-only mode
-#' @return DuckDB connection
+#' @param read_only Open in read-only mode (ignored for SQLite, kept for API compat)
+#' @return SQLite connection
 #' @noRd
 memory_db_open <- function(agent_id = "default", read_only = FALSE) {
-    if (!requireNamespace("duckdb", quietly = TRUE)) {
-        stop("duckdb package required for memory indexing", call. = FALSE)
+    if (!requireNamespace("RSQLite", quietly = TRUE)) {
+        stop("RSQLite package required for memory indexing", call. = FALSE)
     }
 
     path <- memory_db_path(agent_id)
-    con <- DBI::dbConnect(duckdb::duckdb(), dbdir = path, read_only = read_only)
+    con <- DBI::dbConnect(RSQLite::SQLite(), dbname = path)
 
     if (!read_only) {
         memory_db_init_schema(con)
@@ -415,10 +497,10 @@ memory_db_open <- function(agent_id = "default", read_only = FALSE) {
 
 #' Close memory database connection
 #'
-#' @param con DuckDB connection
+#' @param con SQLite connection
 #' @noRd
 memory_db_close <- function(con) {
-    DBI::dbDisconnect(con, shutdown = TRUE)
+    DBI::dbDisconnect(con)
 }
 
 #' Compute hash of text content
@@ -517,26 +599,31 @@ memory_index_file <- function(con, path, source = "memory", force = FALSE) {
     chunks <- memory_chunk_text(lines)
     now <- as.integer(Sys.time())
 
+    sql_insert_chunk <- paste0(
+        "INSERT OR REPLACE INTO chunks ",
+        "(id, path, source, start_line, end_line, hash, text, updated_at) ",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
     for (chunk in chunks) {
         chunk_id <- sprintf("%s:%d-%d", basename(path), chunk$start_line, chunk$end_line)
         chunk_hash <- memory_hash(chunk$text)
 
-        DBI::dbExecute(con, "
-            INSERT OR REPLACE INTO chunks
-            (id, path, source, start_line, end_line, hash, text, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ", params = list(
-            chunk_id, path, source,
-            chunk$start_line, chunk$end_line,
-            chunk_hash, chunk$text, now
-        ))
+        DBI::dbExecute(con, sql_insert_chunk, params = list(
+                chunk_id, path, source,
+                chunk$start_line, chunk$end_line,
+                chunk_hash, chunk$text, now
+            ))
     }
 
     # Update files table
-    DBI::dbExecute(con, "
-        INSERT OR REPLACE INTO files (path, source, hash, mtime, size, indexed_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ", params = list(path, source, hash, mtime, size, now))
+    sql_insert_file <- paste0(
+        "INSERT OR REPLACE INTO files ",
+        "(path, source, hash, mtime, size, indexed_at) ",
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    DBI::dbExecute(con, sql_insert_file,
+        params = list(path, source, hash, mtime, size, now))
 
     length(chunks)
 }
@@ -639,26 +726,31 @@ memory_index_claude_session <- function(con, path, force = FALSE) {
     chunks <- memory_chunk_text(lines, chunk_size = 30, overlap = 5)
     now <- as.integer(Sys.time())
 
+    sql_insert_chunk <- paste0(
+        "INSERT OR REPLACE INTO chunks ",
+        "(id, path, source, start_line, end_line, hash, text, updated_at) ",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
     for (chunk in chunks) {
         chunk_id <- sprintf("%s:%d-%d", basename(path), chunk$start_line, chunk$end_line)
         chunk_hash <- memory_hash(chunk$text)
 
-        DBI::dbExecute(con, "
-            INSERT OR REPLACE INTO chunks
-            (id, path, source, start_line, end_line, hash, text, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ", params = list(
-            chunk_id, path, "claude",
-            chunk$start_line, chunk$end_line,
-            chunk_hash, chunk$text, now
-        ))
+        DBI::dbExecute(con, sql_insert_chunk, params = list(
+                chunk_id, path, "claude",
+                chunk$start_line, chunk$end_line,
+                chunk_hash, chunk$text, now
+            ))
     }
 
     # Update files table
-    DBI::dbExecute(con, "
-        INSERT OR REPLACE INTO files (path, source, hash, mtime, size, indexed_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ", params = list(path, "claude", hash, mtime, size, now))
+    sql_insert_file <- paste0(
+        "INSERT OR REPLACE INTO files ",
+        "(path, source, hash, mtime, size, indexed_at) ",
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    DBI::dbExecute(con, sql_insert_file,
+        params = list(path, "claude", hash, mtime, size, now))
 
     length(chunks)
 }
@@ -741,26 +833,30 @@ memory_search_fts <- function(query, agent_id = "default", limit = 20,
     con <- memory_db_open(agent_id, read_only = TRUE)
     on.exit(memory_db_close(con))
 
-    # Load FTS extension
-    DBI::dbExecute(con, "LOAD fts")
-
     # Build query with optional source filter
     source_filter <- if (!is.null(source)) {
-        sprintf("AND source = '%s'", source)
+        "AND c.source = ?"
     } else {
         ""
     }
 
-    sql <- sprintf("
-        SELECT id, path, source, start_line, end_line, text,
-               fts_main_chunks.match_bm25(id, ?) AS score
-        FROM chunks
-        WHERE score IS NOT NULL %s
-        ORDER BY score DESC
-        LIMIT ?
-    ", source_filter)
+    sql <- paste0(
+        "SELECT c.id, c.path, c.source, c.start_line, c.end_line, c.text, ",
+        "chunks_fts.rank AS score ",
+        "FROM chunks_fts ",
+        "JOIN chunks c ON c.id = chunks_fts.id ",
+        "WHERE chunks_fts MATCH ? ",
+        source_filter, " ",
+        "ORDER BY chunks_fts.rank ",
+        "LIMIT ?")
 
-    DBI::dbGetQuery(con, sql, params = list(query, limit))
+    params <- if (!is.null(source)) {
+        list(query, source, limit)
+    } else {
+        list(query, limit)
+    }
+
+    DBI::dbGetQuery(con, sql, params = params)
 }
 
 #' Get memory index statistics
@@ -772,15 +868,15 @@ memory_stats <- function(agent_id = "default") {
     con <- memory_db_open(agent_id, read_only = TRUE)
     on.exit(memory_db_close(con))
 
-    files <- DBI::dbGetQuery(con, "
-        SELECT source, COUNT(*) as count, SUM(size) as total_size
-        FROM files GROUP BY source
-    ")
+    files <- DBI::dbGetQuery(con, paste0(
+        "SELECT source, COUNT(*) as count, SUM(size) as total_size ",
+        "FROM files GROUP BY source"
+    ))
 
-    chunks <- DBI::dbGetQuery(con, "
-        SELECT source, COUNT(*) as count
-        FROM chunks GROUP BY source
-    ")
+    chunks <- DBI::dbGetQuery(con, paste0(
+        "SELECT source, COUNT(*) as count ",
+        "FROM chunks GROUP BY source"
+    ))
 
     list(
         files = files,
@@ -789,4 +885,3 @@ memory_stats <- function(agent_id = "default") {
         total_chunks = sum(chunks$count)
     )
 }
-

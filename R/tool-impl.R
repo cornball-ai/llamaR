@@ -318,21 +318,84 @@ tool_memory_store <- function(args) {
     fact <- args$fact
     scope <- args$scope %||% "project"
 
-    if (scope == "global") {
-        memory_path <- path.expand("~/.llamar/MEMORY.md")
-    } else {
-        memory_path <- file.path(getwd(), ".llamar", "MEMORY.md")
+    # Use memory module for storage (handles tags, categorization)
+    tryCatch({
+            memory_store(fact, scope = scope, cwd = getwd())
+            clean_fact <- strip_tags(fact)
+            tags <- parse_tags(fact)
+            tag_str <- if (length(tags) > 0) {
+                sprintf(" [%s]", paste0("#", tags, collapse = " "))
+            } else {
+                ""
+            }
+            ok(sprintf("Stored%s: %s%s",
+                    if (scope == "global") " (global)" else "",
+                    clean_fact, tag_str))
+        }, error = function(e) {
+            err(paste("Memory store error:", e$message))
+        })
+}
+
+tool_memory_recall <- function(args) {
+    query <- args$query
+    scope <- args$scope %||% "both"
+
+    tryCatch({
+            results <- memory_search(query, scope = scope, cwd = getwd())
+            if (length(results) == 0) {
+                ok(sprintf("No memories found matching: %s", query))
+            } else {
+                formatted <- format_memory_results(results)
+                ok(formatted)
+            }
+        }, error = function(e) {
+            err(paste("Memory search error:", e$message))
+        })
+}
+
+# Memory file access ----
+
+tool_memory_get <- function(args) {
+    path <- args$path
+    if (is.null(path) || nchar(trimws(path)) == 0) {
+        return(err("path is required"))
     }
 
-    # Create directory if needed
-    dir.create(dirname(memory_path), showWarnings = FALSE, recursive = TRUE)
+    workspace <- get_workspace_dir()
 
-    # Append fact with timestamp
-    timestamp <- format(Sys.time(), "%Y-%m-%d")
-    entry <- sprintf("- %s (%s)\n", fact, timestamp)
+    # Security: only allow MEMORY.md or files under memory/ within workspace
+    # Normalize to prevent traversal
+    full_path <- normalizePath(file.path(workspace, path), mustWork = FALSE)
+    if (!startsWith(full_path, normalizePath(workspace, mustWork = FALSE))) {
+        return(err("Access denied: path must be within workspace"))
+    }
 
-    cat(entry, file = memory_path, append = TRUE)
-    ok(sprintf("Stored: %s", fact))
+    # Only allow MEMORY.md or memory/*.md
+    rel <- sub(paste0("^", normalizePath(workspace, mustWork = FALSE), "/?"), "", full_path)
+    if (rel != "MEMORY.md" && !grepl("^memory/", rel)) {
+        return(err("Access denied: only MEMORY.md or memory/*.md files allowed"))
+    }
+
+    if (!file.exists(full_path)) {
+        return(err(paste("File not found:", path)))
+    }
+
+    lines <- readLines(full_path, warn = FALSE)
+
+    # Apply line range if specified
+    from <- args$from %||% 1L
+    if (from < 1) from <- 1L
+    if (from > length(lines)) {
+        return(ok("(no content at specified line range)"))
+    }
+
+    if (!is.null(args$lines)) {
+        end <- min(from + args$lines - 1L, length(lines))
+    } else {
+        end <- length(lines)
+    }
+
+    ok(paste(lines[from:end], collapse = "\n"))
 }
 
 # Chat (llm.api) ----
@@ -597,6 +660,95 @@ register_builtin_skills <- function() {
             handler = function(args, ctx) tool_memory_store(args)
         ))
 
+    register_skill(skill_spec(
+            name = "memory_recall",
+            description = "Search memories for facts, preferences, or context. Use to recall user preferences, project conventions, or past decisions.",
+            params = list(
+                query = list(type = "string", description = "Search query (keyword or #tag)", required = TRUE),
+                scope = list(type = "string", description = "Where to search: project, global, or both",
+                    enum = list("both", "project", "global"))
+            ),
+            handler = function(args, ctx) tool_memory_recall(args)
+        ))
+
+    register_skill(skill_spec(
+            name = "memory_get",
+            description = "Read a memory file (MEMORY.md or memory/*.md) with optional line range",
+            params = list(
+                path = list(type = "string", description = "File path relative to workspace (e.g., MEMORY.md or memory/2025-01-15.md)", required = TRUE),
+                from = list(type = "integer", description = "Start line (1-based)"),
+                lines = list(type = "integer", description = "Number of lines to return")
+            ),
+            handler = function(args, ctx) tool_memory_get(args)
+        ))
+
+    # Subagent tools
+    register_skill(skill_spec(
+            name = "spawn_subagent",
+            description = "Spawn a specialized subagent for a task. Use for parallel work or tasks requiring focused attention.",
+            params = list(
+                task = list(type = "string", description = "Task description for the subagent", required = TRUE),
+                model = list(type = "string", description = "Optional model override"),
+                tools = list(type = "array", description = "Optional tool filter (list of tool names)")
+            ),
+            handler = function(args, ctx) {
+                tryCatch({
+                        id <- subagent_spawn(
+                            task = args$task,
+                            model = args$model,
+                            tools = args$tools,
+                            parent_session = ctx$session
+                        )
+                        ok(sprintf("Spawned subagent %s for: %s", id, args$task))
+                    }, error = function(e) {
+                        err(paste("Spawn failed:", e$message))
+                    })
+            }
+        ))
+
+    register_skill(skill_spec(
+            name = "query_subagent",
+            description = "Send a prompt to a running subagent and get the response.",
+            params = list(
+                id = list(type = "string", description = "Subagent ID", required = TRUE),
+                prompt = list(type = "string", description = "Prompt to send", required = TRUE)
+            ),
+            handler = function(args, ctx) {
+                tryCatch({
+                        result <- subagent_query(args$id, args$prompt)
+                        ok(result)
+                    }, error = function(e) {
+                        err(paste("Query failed:", e$message))
+                    })
+            }
+        ))
+
+    register_skill(skill_spec(
+            name = "list_subagents",
+            description = "List all active subagents.",
+            params = list(),
+            handler = function(args, ctx) {
+                agents <- subagent_list()
+                ok(format_subagent_list(agents))
+            }
+        ))
+
+    register_skill(skill_spec(
+            name = "kill_subagent",
+            description = "Terminate a running subagent.",
+            params = list(
+                id = list(type = "string", description = "Subagent ID to terminate", required = TRUE)
+            ),
+            handler = function(args, ctx) {
+                success <- subagent_kill(args$id)
+                if (success) {
+                    ok(sprintf("Subagent %s terminated", args$id))
+                } else {
+                    err(sprintf("Subagent not found: %s", args$id))
+                }
+            }
+        ))
+
     invisible(list_skills())
 }
 
@@ -610,15 +762,16 @@ register_builtin_skills <- function() {
 #' @param args List of arguments
 #' @param ctx Optional context (cwd, session, etc.)
 #' @param timeout Timeout in seconds (default 30)
+#' @param dry_run If TRUE, validate only without executing
 #' @return MCP tool result
 #' @noRd
-call_tool <- function(name, args, ctx = list(), timeout = 30L) {
+call_tool <- function(name, args, ctx = list(), timeout = 30L, dry_run = FALSE) {
     args <- args %||% list()
 
     # Try skill system first
     skill <- get_skill(name)
     if (!is.null(skill)) {
-        return(skill_run(skill, args, ctx, timeout))
+        return(skill_run(skill, args, ctx, timeout, dry_run))
     }
 
     # Fallback: unknown tool

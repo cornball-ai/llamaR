@@ -41,7 +41,8 @@ parse_args <- function() {
     context_compact_pct = config$context_compact_pct %||% 80L,  # Auto-compact threshold
     session = NULL,  # Session key (resume if exists, create if not)
     list = FALSE,
-    voice = config$voice$enabled %||% FALSE  # Voice mode
+    voice = config$voice$enabled %||% FALSE,  # Voice mode
+    dry_run = config$dry_run %||% FALSE  # Dry-run mode
   )
 
   i <- 1
@@ -68,6 +69,9 @@ parse_args <- function() {
     } else if (arg == "--voice" || arg == "-v") {
       opts$voice <- TRUE
       i <- i + 1
+    } else if (arg == "--dry-run") {
+      opts$dry_run <- TRUE
+      i <- i + 1
     } else if (arg == "--help" || arg == "-h") {
       cat("
 llamar - An open-source interactive CLI agent
@@ -81,6 +85,7 @@ Options:
   --tools         Tool filter: core, file, code, git, r, data, web, chat (default: all)
                   Example: --tools core or --tools file,git,code
   --voice, -v     Start with voice mode enabled
+  --dry-run       Preview tool calls without executing
   --session, -s   Session key (resume if exists, create if not)
   --list          List sessions
   --help, -h      Show this help
@@ -584,9 +589,26 @@ run_agent <- function(opts) {
   approval_mode <- config$approval_mode %||% "ask"
   dangerous_tools <- config$dangerous_tools %||% c("bash", "run_r", "run_r_script", "write_file")
 
-  # Tool handler (captures cwd, approval_mode, dangerous_tools in closure)
+  # Track turn number for trace
+  turn_number <- 0L
+
+  # Tool handler (captures cwd, approval_mode, dangerous_tools, opts in closure)
   tool_handler <- function(name, args) {
+    # Check dry-run mode first
+    if (isTRUE(opts$dry_run)) {
+      cat(sprintf("%s[DRY RUN] %s%s\n", color$yellow, name, color$reset))
+      # Call skill directly with dry_run=TRUE (bypass MCP server)
+      skill <- llamaR:::get_skill(name)
+      if (!is.null(skill)) {
+        preview <- llamaR:::format_dry_run_preview(skill, args)
+        cat(sprintf("%s%s%s\n", color$dim, preview, color$reset))
+        return(preview)
+      }
+      return(sprintf("[DRY RUN] Would call: %s", name))
+    }
+
     # Check if approval needed (only in "ask" mode)
+    approved_by <- "auto"
     if (approval_mode == "ask" && requires_approval(name, dangerous_tools)) {
       if (!is_approved(cwd, name)) {
         approval <- ask_approval(name, args)
@@ -597,7 +619,12 @@ run_agent <- function(opts) {
         if (approval$always) {
           save_approval(cwd, name)
           cat(sprintf("%sApproved for this project%s\n", color$dim, color$reset))
+          approved_by <- "always"
+        } else {
+          approved_by <- "user"
         }
+      } else {
+        approved_by <- "config"
       }
     } else if (approval_mode == "deny" && requires_approval(name, dangerous_tools)) {
       cat(sprintf("%sDenied (approval_mode=deny).%s\n", color$dim, color$reset))
@@ -607,7 +634,10 @@ run_agent <- function(opts) {
     # Brief indicator for tool execution
     cat(sprintf("%s%s...%s ", color$dim, name, color$reset))
 
+    turn_number <<- turn_number + 1L
+    start_time <- Sys.time()
     failed <- FALSE
+
     result <- tryCatch({
       mcp_call(conn, name, args)
     }, error = function(e) {
@@ -636,12 +666,31 @@ run_agent <- function(opts) {
     })
 
     text <- result$text %||% ""
+    elapsed_ms <- as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000
+
     if (!failed) {
       lines <- length(strsplit(text, "\n")[[1]])
       cat(sprintf("%s(%d lines)%s\n", color$dim, lines, color$reset))
       # Store in buffer for /last command
       tool_buffer_add(name, args, text)
     }
+
+    # Record trace (CLI-side, in addition to MCP server side)
+    tryCatch({
+      llamaR:::trace_add(
+        session_id = session$sessionId,
+        tool = name,
+        args = args,
+        result = text,
+        success = !failed,
+        elapsed_ms = round(elapsed_ms),
+        approved_by = approved_by,
+        turn = turn_number
+      )
+    }, error = function(e) {
+      # Trace recording is best-effort
+    })
+
     text
   }
 
@@ -888,6 +937,59 @@ run_agent <- function(opts) {
           cat(formatted, "\n")
         }
         next
+      } else if (cmd == "/flush") {
+        # Manual memory flush: ask LLM to write durable memories
+        flush_prompt <- config$memory_flush_prompt %||% paste0(
+            "Pre-compaction memory flush. ",
+            "Store durable memories now using write_file to memory/YYYY-MM-DD.md ",
+            "in the workspace. Include: preferences discovered, decisions made, ",
+            "technical details worth preserving. ",
+            "If nothing to store, reply with exactly: NO_REPLY")
+
+        if (length(session$messages) < 2) {
+          cat(sprintf("%sNothing to flush (no conversation yet).%s\n", color$dim, color$reset))
+          next
+        }
+
+        cat(sprintf("%sFlushing memories...%s\n", color$cyan, color$reset))
+
+        # Build API history from current messages
+        flush_history <- lapply(session$messages, function(m) {
+          text <- if (is.list(m$content) && length(m$content) > 0 && !is.null(m$content[[1]]$text)) {
+            m$content[[1]]$text
+          } else {
+            m$content
+          }
+          list(role = m$role, content = text)
+        })
+
+        flush_result <- tryCatch({
+          agent(
+            prompt = flush_prompt,
+            tools = tools,
+            tool_handler = tool_handler,
+            system = system_prompt,
+            model = model,
+            provider = provider,
+            history = flush_history,
+            verbose = FALSE
+          )
+        }, error = function(e) {
+          cat(sprintf("%sFlush failed: %s%s\n", color$bright_magenta, e$message, color$reset))
+          NULL
+        })
+
+        if (!is.null(flush_result)) {
+          content <- flush_result$content
+          if (!startsWith(trimws(content), "NO_REPLY")) {
+            cat(sprintf("%sMemories flushed.%s\n", color$green, color$reset))
+            # Reload context to pick up new memory files
+            system_prompt <- llamaR:::load_context(cwd)
+          } else {
+            cat(sprintf("%sNothing to flush.%s\n", color$dim, color$reset))
+          }
+        }
+        next
       } else if (cmd == "/last") {
         # /last [N] - show tool output (default: most recent)
         n <- if (!is.null(cmd_arg)) as.integer(cmd_arg) else 1L
@@ -932,6 +1034,238 @@ run_agent <- function(opts) {
           cat(sprintf("\n%sUse /last [N] to view output%s\n", color$dim, color$reset))
         }
         next
+      } else if (cmd == "/dryrun") {
+        # Toggle dry-run mode
+        opts$dry_run <- !isTRUE(opts$dry_run)
+        if (opts$dry_run) {
+          cat(sprintf("%sDry-run mode enabled - tool calls will show preview only%s\n",
+                      color$yellow, color$reset))
+        } else {
+          cat(sprintf("%sDry-run mode disabled - tool calls will execute normally%s\n",
+                      color$dim, color$reset))
+        }
+        next
+      } else if (cmd == "/trace") {
+        # Show tool execution trace
+        n <- if (!is.null(cmd_arg)) as.integer(cmd_arg) else 20L
+        trace <- llamaR:::trace_load(session$sessionId, n = n)
+        if (length(trace) == 0) {
+          cat(sprintf("%sNo tool calls recorded for this session.%s\n", color$dim, color$reset))
+        } else {
+          cat(llamaR:::format_trace(trace, show_args = TRUE), "\n")
+        }
+        next
+      } else if (cmd == "/skill" || cmd == "/skills") {
+        # Skill management commands
+        subcmd <- if (length(cmd_parts) > 1) cmd_parts[2] else "list"
+
+        if (subcmd == "list") {
+          tryCatch({
+            skills <- llamaR::skill_list_installed()
+            cat(llamaR:::format_skill_list(skills), "\n")
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "install" && length(cmd_parts) >= 3) {
+          source <- cmd_parts[3]
+          force <- "--force" %in% cmd_parts
+          tryCatch({
+            name <- llamaR::skill_install(source, force = force)
+            cat(sprintf("%sInstalled skill: %s%s\n", color$green, name, color$reset))
+            # Reload skills
+            llamaR:::load_skill_docs(path.expand("~/.llamar/skills"))
+            llamaR:::load_skills(path.expand("~/.llamar/skills"))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "remove" && length(cmd_parts) >= 3) {
+          name <- cmd_parts[3]
+          tryCatch({
+            llamaR::skill_remove(name)
+            cat(sprintf("%sRemoved skill: %s%s\n", color$dim, name, color$reset))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "test" && length(cmd_parts) >= 3) {
+          path <- cmd_parts[3]
+          tryCatch({
+            result <- llamaR::skill_test(path)
+            if (result$failed == 0) {
+              cat(sprintf("%s%d test(s) passed%s\n", color$green, result$passed, color$reset))
+            } else {
+              cat(sprintf("%s%d passed, %d failed%s\n", color$yellow, result$passed, result$failed, color$reset))
+            }
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else {
+          cat("Usage:
+  /skill list                 List installed skills
+  /skill install <path|url>   Install a skill
+  /skill install <path> --force   Reinstall skill
+  /skill remove <name>        Remove a skill
+  /skill test <path>          Run skill tests
+")
+        }
+        next
+      } else if (cmd == "/spawn") {
+        # Spawn a subagent
+        if (length(cmd_parts) < 2) {
+          cat("Usage: /spawn <task description>\n")
+          cat("       /spawn <task> --model llama3.2\n")
+          next
+        }
+        task_text <- paste(cmd_parts[-1], collapse = " ")
+
+        # Parse --model if present
+        subagent_model <- NULL
+        if (grepl("--model", task_text)) {
+          parts <- strsplit(task_text, "--model\\s+")[[1]]
+          task_text <- trimws(parts[1])
+          model_parts <- strsplit(trimws(parts[2]), "\\s+")[[1]]
+          subagent_model <- model_parts[1]
+        }
+
+        tryCatch({
+          id <- llamaR::subagent_spawn(
+            task = task_text,
+            model = subagent_model,
+            parent_session = session
+          )
+          cat(sprintf("%sSpawned subagent: %s%s\n", color$green, id, color$reset))
+          cat(sprintf("%sUse /ask %s <prompt> to query%s\n", color$dim, id, color$reset))
+        }, error = function(e) {
+          cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+        })
+        next
+      } else if (cmd == "/agents") {
+        # List active subagents
+        agents <- llamaR::subagent_list()
+        cat(llamaR:::format_subagent_list(agents), "\n")
+        next
+      } else if (cmd == "/ask" && length(cmd_parts) >= 3) {
+        # Query a subagent: /ask <id> <prompt>
+        subagent_id <- cmd_parts[2]
+        subagent_prompt <- paste(cmd_parts[3:length(cmd_parts)], collapse = " ")
+
+        cat(sprintf("%sQuerying subagent %s...%s\n", color$dim, subagent_id, color$reset))
+        tryCatch({
+          result <- llamaR::subagent_query(subagent_id, subagent_prompt)
+          cat(sprintf("%s%s%s\n", color$cyan, result, color$reset))
+        }, error = function(e) {
+          cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+        })
+        next
+      } else if (cmd == "/kill" && length(cmd_parts) >= 2) {
+        # Kill a subagent
+        subagent_id <- cmd_parts[2]
+        tryCatch({
+          success <- llamaR::subagent_kill(subagent_id)
+          if (success) {
+            cat(sprintf("%sSubagent %s terminated%s\n", color$dim, subagent_id, color$reset))
+          } else {
+            cat(sprintf("%sSubagent not found: %s%s\n", color$yellow, subagent_id, color$reset))
+          }
+        }, error = function(e) {
+          cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+        })
+        next
+      } else if (cmd == "/task" || cmd == "/tasks") {
+        # Task/scheduler commands
+        subcmd <- if (length(cmd_parts) > 1) cmd_parts[2] else "list"
+
+        if (subcmd == "list") {
+          tryCatch({
+            tasks <- llamaR::task_list(status = "all")
+            cat(llamaR:::format_task_list(tasks), "\n")
+          }, error = function(e) {
+            if (grepl("RSQLite", e$message)) {
+              cat(sprintf("%sTask scheduling requires RSQLite package%s\n", color$yellow, color$reset))
+            } else {
+              cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+            }
+          })
+        } else if (subcmd == "add" && length(cmd_parts) >= 3) {
+          # /task add "name" --schedule "0 8 * * *" --prompt "do something"
+          # Simple parsing: /task add "name" "prompt" [schedule]
+          name <- cmd_parts[3]
+          prompt <- if (length(cmd_parts) >= 4) paste(cmd_parts[4:length(cmd_parts)], collapse = " ") else ""
+
+          if (nchar(prompt) == 0) {
+            cat("Usage: /task add <name> <prompt> [--schedule <cron>]\n")
+            next
+          }
+
+          # Parse --schedule if present
+          schedule <- NULL
+          if (grepl("--schedule", prompt)) {
+            parts <- strsplit(prompt, "--schedule\\s+")[[1]]
+            prompt <- trimws(parts[1])
+            schedule <- trimws(parts[2])
+          }
+
+          tryCatch({
+            id <- llamaR::task_create(name = name, prompt = prompt, schedule = schedule)
+            cat(sprintf("%sTask created with ID %d%s\n", color$green, id, color$reset))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "run" && length(cmd_parts) >= 3) {
+          task_id <- as.integer(cmd_parts[3])
+          tryCatch({
+            task <- llamaR::task_get(task_id)
+            if (is.null(task)) {
+              cat(sprintf("%sTask not found: %d%s\n", color$yellow, task_id, color$reset))
+            } else {
+              cat(sprintf("%sRunning task: %s%s\n", color$cyan, task$name, color$reset))
+              result <- llamaR:::scheduler_execute_task(task, config, verbose = FALSE)
+              if (result$success) {
+                cat(sprintf("%s%s%s\n", color$dim, result$result, color$reset))
+                llamaR:::task_record_run(task_id, "success", result = result$result,
+                                         tokens_used = result$tokens_used)
+              } else {
+                cat(sprintf("%sError: %s%s\n", color$red, result$error, color$reset))
+                llamaR:::task_record_run(task_id, "error", error = result$error)
+              }
+            }
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "pause" && length(cmd_parts) >= 3) {
+          task_id <- as.integer(cmd_parts[3])
+          tryCatch({
+            llamaR::task_pause(task_id)
+            cat(sprintf("%sTask %d paused%s\n", color$dim, task_id, color$reset))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "resume" && length(cmd_parts) >= 3) {
+          task_id <- as.integer(cmd_parts[3])
+          tryCatch({
+            llamaR::task_resume(task_id)
+            cat(sprintf("%sTask %d resumed%s\n", color$green, task_id, color$reset))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else if (subcmd == "delete" && length(cmd_parts) >= 3) {
+          task_id <- as.integer(cmd_parts[3])
+          tryCatch({
+            llamaR::task_delete(task_id)
+            cat(sprintf("%sTask %d deleted%s\n", color$dim, task_id, color$reset))
+          }, error = function(e) {
+            cat(sprintf("%sError: %s%s\n", color$red, e$message, color$reset))
+          })
+        } else {
+          cat("Usage:
+  /task list              List all scheduled tasks
+  /task add <name> <prompt> [--schedule <cron>]
+  /task run <id>          Run a task immediately
+  /task pause <id>        Pause a scheduled task
+  /task resume <id>       Resume a paused task
+  /task delete <id>       Delete a task
+")
+        }
+        next
       } else if (cmd == "/help") {
         cat("
 Commands:
@@ -944,12 +1278,35 @@ Commands:
   /model <name>  Switch model
   /provider <p>  Switch provider (anthropic, openai, ollama)
   /voice         Toggle voice mode (requires tts.api, stt.api)
+  /dryrun        Toggle dry-run mode (preview tools without executing)
+  /trace [N]     Show last N tool executions (default: 20)
 
 Memory:
   /remember <fact> #tags      Remember with auto-categorization
   /remember --global <fact>   Remember to global memory
   /recall <query>             Search memories
   /recall --tags              List all memory tags
+  /flush                      Flush durable memories to daily log
+
+Scheduler:
+  /task list                  List scheduled tasks
+  /task add <name> <prompt>   Create a task
+  /task run <id>              Run a task now
+  /task pause/resume <id>     Pause or resume a task
+  /task delete <id>           Delete a task
+
+Subagents:
+  /spawn <task>               Spawn a subagent for task
+  /spawn <task> --model x     Spawn with specific model
+  /agents                     List active subagents
+  /ask <id> <prompt>          Query a subagent
+  /kill <id>                  Terminate a subagent
+
+Skills:
+  /skill list                 List installed skills
+  /skill install <path|url>   Install a skill
+  /skill remove <name>        Remove a skill
+  /skill test <path>          Run skill tests
 
 Tool output:
   /last [N]      Show tool output (1=most recent)
@@ -1036,6 +1393,56 @@ Tool output:
           # Add current response before compacting so it's included in summary
           session <- llamaR:::session_add_message(session, "assistant", result$content)
           llamaR:::transcript_append(session, "assistant", result$content)
+
+          # Pre-compaction memory flush
+          flush_enabled <- config$memory_flush_enabled %||% TRUE
+          compaction_count <- session$compactionCount %||% 0L
+          flush_count <- session$memoryFlushCompactionCount %||% 0L
+          if (isTRUE(flush_enabled) && flush_count <= compaction_count) {
+            flush_prompt <- config$memory_flush_prompt %||% paste0(
+                "Pre-compaction memory flush. ",
+                "Store durable memories now using write_file to memory/YYYY-MM-DD.md ",
+                "in the workspace. Include: preferences discovered, decisions made, ",
+                "technical details worth preserving. ",
+                "If nothing to store, reply with exactly: NO_REPLY")
+
+            cat(sprintf("%sFlushing memories before compaction...%s\n", color$cyan, color$reset))
+
+            flush_history <- lapply(session$messages, function(m) {
+              text <- if (is.list(m$content) && length(m$content) > 0 && !is.null(m$content[[1]]$text)) {
+                m$content[[1]]$text
+              } else {
+                m$content
+              }
+              list(role = m$role, content = text)
+            })
+
+            flush_result <- tryCatch({
+              agent(
+                prompt = flush_prompt,
+                tools = tools,
+                tool_handler = tool_handler,
+                system = system_prompt,
+                model = model,
+                provider = provider,
+                history = flush_history,
+                verbose = FALSE
+              )
+            }, error = function(e) {
+              cat(sprintf("%sFlush failed: %s%s\n", color$bright_magenta, e$message, color$reset))
+              NULL
+            })
+
+            if (!is.null(flush_result)) {
+              content <- flush_result$content
+              if (!startsWith(trimws(content), "NO_REPLY")) {
+                cat(sprintf("%sMemories flushed.%s\n", color$green, color$reset))
+                system_prompt <- llamaR:::load_context(cwd)
+              }
+            }
+
+            session$memoryFlushCompactionCount <- compaction_count + 1L
+          }
 
           compact_result <- do_compact(session, provider, display_model, system_prompt)
           if (!is.null(compact_result)) {

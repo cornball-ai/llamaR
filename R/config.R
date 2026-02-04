@@ -88,6 +88,19 @@ load_config <- function (cwd = getwd()) {
         config$context_compact_pct <- 80L
     }
 
+    # Memory flush before compaction
+    if (is.null(config$memory_flush_enabled)) {
+        config$memory_flush_enabled <- TRUE
+    }
+    if (is.null(config$memory_flush_prompt)) {
+        config$memory_flush_prompt <- paste0(
+            "Pre-compaction memory flush. ",
+            "Store durable memories now using write_file to memory/YYYY-MM-DD.md ",
+            "in the workspace. Include: preferences discovered, decisions made, ",
+            "technical details worth preserving. ",
+            "If nothing to store, reply with exactly: NO_REPLY")
+    }
+
     # Tool approval settings
     if (is.null(config$approval_mode)) {
         config$approval_mode <- "ask"# "ask", "allow", "deny"
@@ -125,6 +138,32 @@ load_config <- function (cwd = getwd()) {
     if (is.null(config$skill_timeout)) {
         config$skill_timeout <- 30L
     }
+
+    # Dry-run mode (validate tools without executing)
+    if (is.null(config$dry_run)) {
+        config$dry_run <- FALSE
+    }
+
+    # Rate limits per provider
+    # Example: { "anthropic": { "tokens_per_hour": 100000, "requests_per_minute": 60 } }
+    if (is.null(config$rate_limits)) {
+        config$rate_limits <- list()
+    }
+
+    # Subagent configuration
+    if (is.null(config$subagents)) {
+        config$subagents <- list()
+    }
+    sub <- config$subagents
+    if (is.null(sub$enabled)) sub$enabled <- TRUE
+    if (is.null(sub$max_concurrent)) sub$max_concurrent <- 3L
+    if (is.null(sub$timeout_minutes)) sub$timeout_minutes <- 30L
+    if (is.null(sub$allow_nested)) sub$allow_nested <- FALSE
+    if (is.null(sub$default_tools)) {
+        sub$default_tools <- c("read_file", "write_file", "bash", "chat")
+    }
+    if (is.null(sub$base_port)) sub$base_port <- 7851L
+    config$subagents <- sub
 
     # Voice mode config
     if (is.null(config$voice)) {

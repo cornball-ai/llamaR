@@ -10,7 +10,7 @@ tool_categories <- list(
     web = c("web_search", "fetch_url"),
     git = c("git_status", "git_diff", "git_log"),
     chat = c("chat", "chat_models"),
-    memory = c("memory_store")
+    memory = c("memory_store", "memory_recall", "memory_get")
 )
 
 #' Get list of available MCP tools

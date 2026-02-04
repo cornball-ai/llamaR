@@ -18,9 +18,9 @@ Imports:
 Suggests:
     DBI,
     digest,
-    duckdb,
     fyi,
     llm.api,
+    RSQLite,
     stt.api,
     tinytest,
     tts.api

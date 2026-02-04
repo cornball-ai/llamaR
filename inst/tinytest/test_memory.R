@@ -96,7 +96,58 @@ expect_equal(formatted, "No matching memories found.")
 unlink(tmp, recursive = TRUE)
 
 # ============================================================================
-# DuckDB Memory Index Tests
+# Daily Memory Log Tests
+# ============================================================================
+
+# Test memory_log_path returns correct date format
+log_path <- llamaR:::memory_log_path(as.Date("2025-06-15"))
+expect_true(grepl("2025-06-15\\.md$", log_path))
+expect_true(grepl("memory", log_path))
+
+# Test daily log operations with temp directory
+tmp_home <- tempfile()
+dir.create(tmp_home, recursive = TRUE)
+old_home <- Sys.getenv("HOME")
+Sys.setenv(HOME = tmp_home)
+
+# Create workspace dir
+workspace <- file.path(tmp_home, ".llamar", "workspace", "memory")
+dir.create(workspace, recursive = TRUE)
+
+tryCatch({
+    # Test memory_log_write creates file with header
+    path <- llamaR:::memory_log_write("First entry\n", date = as.Date("2025-01-10"))
+    expect_true(file.exists(path))
+    content <- readLines(path, warn = FALSE)
+    expect_true(any(grepl("^# Memory Log: 2025-01-10", content)))
+    expect_true(any(grepl("First entry", content)))
+
+    # Test memory_log_write appends content
+    llamaR:::memory_log_write("Second entry\n", date = as.Date("2025-01-10"))
+    content <- readLines(path, warn = FALSE)
+    expect_true(any(grepl("Second entry", content)))
+
+    # Create another day's log
+    llamaR:::memory_log_write("Day two entry\n", date = as.Date("2025-01-11"))
+
+    # Test memory_log_list returns sorted list (newest first)
+    files <- llamaR:::memory_log_list()
+    expect_equal(length(files), 2)
+    expect_true(grepl("2025-01-11", files[1]))
+    expect_true(grepl("2025-01-10", files[2]))
+
+    # Test memory_log_load_all concatenates all logs
+    all_logs <- llamaR:::memory_log_load_all()
+    expect_true(!is.null(all_logs))
+    expect_true(grepl("First entry", all_logs))
+    expect_true(grepl("Day two entry", all_logs))
+}, finally = {
+    Sys.setenv(HOME = old_home)
+    unlink(tmp_home, recursive = TRUE)
+})
+
+# ============================================================================
+# SQLite Memory Index Tests
 # ============================================================================
 
 # Test memory_hash
@@ -163,14 +214,14 @@ expect_equal(length(lines), 0)
 sessions <- llamaR:::find_claude_sessions("/nonexistent/dir")
 expect_equal(length(sessions), 0)
 
-# DuckDB tests (only if duckdb available)
-if (requireNamespace("duckdb", quietly = TRUE) &&
+# SQLite tests (only if RSQLite available)
+if (requireNamespace("RSQLite", quietly = TRUE) &&
     requireNamespace("DBI", quietly = TRUE) &&
     requireNamespace("digest", quietly = TRUE)) {
 
     # Test memory_db_path
     path <- llamaR:::memory_db_path("test-agent")
-    expect_true(grepl("test-agent.duckdb$", path))
+    expect_true(grepl("test-agent.sqlite$", path))
 
     # Test database operations with temp directory
     tmp_db_dir <- tempfile()
@@ -192,6 +243,7 @@ if (requireNamespace("duckdb", quietly = TRUE) &&
         expect_true("meta" %in% tables)
         expect_true("files" %in% tables)
         expect_true("chunks" %in% tables)
+        expect_true("chunks_fts" %in% tables)
 
         # Test indexing a file
         tmp_file <- tempfile(fileext = ".md")
@@ -207,6 +259,11 @@ if (requireNamespace("duckdb", quietly = TRUE) &&
         # Verify chunks exist
         chunks <- DBI::dbGetQuery(con, "SELECT * FROM chunks WHERE source = 'test'")
         expect_true(nrow(chunks) > 0)
+
+        # Test FTS search returns results
+        fts_results <- DBI::dbGetQuery(con,
+            "SELECT id, rank FROM chunks_fts WHERE chunks_fts MATCH 'content'")
+        expect_true(nrow(fts_results) > 0)
 
         # Test re-indexing unchanged file returns 0
         chunks_indexed <- llamaR:::memory_index_file(con, tmp_file, source = "test")
@@ -225,3 +282,59 @@ if (requireNamespace("duckdb", quietly = TRUE) &&
     })
 }
 
+# ============================================================================
+# memory_get Tool Tests
+# ============================================================================
+
+# Test memory_get security: reject paths outside workspace
+tmp_home <- tempfile()
+dir.create(tmp_home, recursive = TRUE)
+old_home <- Sys.getenv("HOME")
+Sys.setenv(HOME = tmp_home)
+
+workspace <- file.path(tmp_home, ".llamar", "workspace")
+dir.create(file.path(workspace, "memory"), recursive = TRUE)
+
+get_text <- function(result) result$content[[1]]$text
+
+tryCatch({
+    # Create test files
+    writeLines("Global memory content", file.path(workspace, "MEMORY.md"))
+    writeLines("Daily log content", file.path(workspace, "memory", "2025-01-15.md"))
+
+    # Security: reject paths with traversal
+    result <- llamaR:::tool_memory_get(list(path = "../../etc/passwd"))
+    expect_true(grepl("Access denied", get_text(result)))
+
+    # Security: reject paths not in memory/ or MEMORY.md
+    result <- llamaR:::tool_memory_get(list(path = "SOUL.md"))
+    expect_true(grepl("Access denied", get_text(result)))
+
+    # Success: read MEMORY.md
+    result <- llamaR:::tool_memory_get(list(path = "MEMORY.md"))
+    expect_true(grepl("Global memory content", get_text(result)))
+
+    # Success: read memory/*.md
+    result <- llamaR:::tool_memory_get(list(path = "memory/2025-01-15.md"))
+    expect_true(grepl("Daily log content", get_text(result)))
+
+    # Line range: from/lines parameters
+    writeLines(c("line1", "line2", "line3", "line4", "line5"),
+        file.path(workspace, "MEMORY.md"))
+    result <- llamaR:::tool_memory_get(list(path = "MEMORY.md", from = 2L, lines = 2L))
+    expect_true(grepl("line2", get_text(result)))
+    expect_true(grepl("line3", get_text(result)))
+    expect_false(grepl("line1", get_text(result)))
+    expect_false(grepl("line4", get_text(result)))
+
+    # File not found
+    result <- llamaR:::tool_memory_get(list(path = "memory/nonexistent.md"))
+    expect_true(grepl("not found", get_text(result)))
+
+    # Empty path
+    result <- llamaR:::tool_memory_get(list(path = ""))
+    expect_true(grepl("required", get_text(result)))
+}, finally = {
+    Sys.setenv(HOME = old_home)
+    unlink(tmp_home, recursive = TRUE)
+})

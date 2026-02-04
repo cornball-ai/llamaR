@@ -77,9 +77,9 @@ voice_available <- function (config = list()) {
             port <- stt_cfg$port %||% 4123L
             base_url <- sprintf("http://127.0.0.1:%d", port)
             health <- tryCatch({
-                stt.api::set_stt_base(base_url)
-                stt.api::stt_health()
-            }, error = function(e) list(ok = FALSE))
+                    stt.api::set_stt_base(base_url)
+                    stt.api::stt_health()
+                }, error = function(e) list(ok = FALSE))
             result$stt <- isTRUE(health$ok)
             if (!result$stt) {
                 result$reason <- c(result$reason,
@@ -88,8 +88,8 @@ voice_available <- function (config = list()) {
         } else if (backend == "whisper") {
             # Native whisper via audio.whisper - use stt_health to check
             health <- tryCatch({
-                stt.api::stt_health()
-            }, error = function(e) list(ok = FALSE))
+                    stt.api::stt_health()
+                }, error = function(e) list(ok = FALSE))
             result$stt <- isTRUE(health$ok)
             if (!result$stt) {
                 result$reason <- c(result$reason,
