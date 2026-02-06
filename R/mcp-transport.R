@@ -46,7 +46,7 @@ run_socket <- function (port) {
     while (TRUE) {
         # Accept client connection
         client <- tryCatch(
-            socketAccept(server, blocking = TRUE, open = "r+b"),
+            socketAccept(server, blocking = TRUE, open = "r+b", timeout = 86400),
             error = function (e) NULL
         )
 
