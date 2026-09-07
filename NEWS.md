@@ -1,3 +1,15 @@
+# corteza 0.7.1.45
+
+- **Codex request-buffer overflow is now recoverable.** Long Responses-wire
+  histories are measured by serialized bytes as well as semantic tokens, so
+  opaque encrypted reasoning cannot silently exceed the gateway buffer before
+  normal context compaction fires. A 507 request-buffer rejection forces a
+  safe-cut compaction and prompt-free continuation of the authoritative
+  provider-native history, bounded to three retries by default. The same guard
+  covers the retry after a model context-window overflow, preserves completed
+  turn and usage accounting, and exposes byte/retry provenance to durable
+  hosts.
+
 # corteza 0.7.1.44
 
 - **Context compaction now belongs to the shared agent lifecycle.** `turn()`
