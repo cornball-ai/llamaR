@@ -10,6 +10,7 @@ maybe_compact_turn_session(
   tools = NULL,
   system = NULL,
   threshold,
+  byte_limit,
   min_messages,
   reason = "threshold"
 )
@@ -32,6 +33,10 @@ from `session$tools_filter` as before.}
 sessions use `config$context_compact_pct` and subagents use their stricter
 inherited policy. Explicit NULL disables compaction.}
 
+\item{byte_limit}{Optional serialized-request threshold. When omitted,
+`config$context_compact_bytes` applies to `openai_codex`; other providers
+have no byte threshold. Explicit `Inf` disables the byte guard.}
+
 \item{min_messages}{Optional minimum history entries. The ordinary policy
 uses its configured value; forced overflow recovery may lower this because
 a few individual entries can themselves exceed the context window.}
@@ -42,7 +47,7 @@ a few individual entries can themselves exceed the context window.}
 Decision points:
 - Compaction mode off → return invisibly without checking.
 - History shorter than `min_messages` → skip (nothing to gain).
-- Live token usage below threshold → skip.
+- Live token usage and serialized request size below thresholds → skip.
 - No safe cut available (e.g. open tool_use) → skip.
 - Summarizer fails → log and leave history intact.
 }

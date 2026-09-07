@@ -87,6 +87,16 @@ load_config <- function(cwd = getwd()) {
     if (is.null(config$context_compact_pct)) {
         config$context_compact_pct <- 90L
     }
+    # The Codex Responses transport can reject a provider-native history on
+    # serialized request size before the model's token window is full. This is
+    # a wire-size guard, not another token estimate; it is currently applied
+    # only to openai_codex histories by maybe_compact_turn_session().
+    if (is.null(config$context_compact_bytes)) {
+        config$context_compact_bytes <- 900000L
+    }
+    if (is.null(config$context_request_buffer_retries)) {
+        config$context_request_buffer_retries <- 3L
+    }
 
     # SOUL.md and USER.md inclusion (passed to saber::agent_context).
     # NULL = use saber's default for the agent (which includes them).

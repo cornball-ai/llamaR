@@ -1078,9 +1078,16 @@ turn <- function(prompt, session, tool_executor = NULL, tools = NULL) {
             session$history <- history
         }
     }
+    attempt_checkpoint_usage <- list()
+    attempt_checkpoint_turns <- 0L
     if ("checkpoint_callback" %in% names(formals(llm.api::agent))) {
         agent_args$checkpoint_callback <- function(history, context) {
             session$last_checkpoint_context <- context
+            attempt_checkpoint_usage <<- .turn_add_usage(
+                attempt_checkpoint_usage, context$usage %||% list())
+            attempt_checkpoint_turns <<- max(
+                attempt_checkpoint_turns,
+                as.integer(context$agent_turn %||% 0L))
             if (compact_session_history(history, reason = "checkpoint")) {
                 return(list(history = session$history))
             }
@@ -1142,7 +1149,64 @@ turn <- function(prompt, session, tool_executor = NULL, tools = NULL) {
         }
     }
 
-    response <- .agent_with_fallback(agent_args, session)
+    # A long provider-native Codex trajectory may hit the gateway's byte buffer
+    # before it hits the model's token window. history_callback has already
+    # mirrored every complete assistant/tool round, so force a safe-cut
+    # compaction and continue without appending the original prompt again.
+    # Keep this bounded: repeated failures with no effective shrink must surface
+    # rather than loop forever.
+    max_request_buffer_retries <- as.integer(
+        compact_config$context_request_buffer_retries %||% 3L)
+    if (length(max_request_buffer_retries) != 1L ||
+        is.na(max_request_buffer_retries) || max_request_buffer_retries < 0L) {
+        max_request_buffer_retries <- 3L
+    }
+    call_agent <- function(args) {
+        attempt_checkpoint_usage <<- list()
+        attempt_checkpoint_turns <<- 0L
+        tryCatch(.agent_with_fallback(args, session), error = function(e) e)
+    }
+    call_agent_request_safe <- function(args) {
+        recovered_usage <- list()
+        recovered_turns <- 0L
+        request_buffer_retries <- 0L
+        max_turns <- as.integer(args$max_turns)
+        response <- call_agent(args)
+        while (inherits(response, "error") &&
+            .is_request_buffer_error(response)) {
+            if (request_buffer_retries >= max_request_buffer_retries) {
+                stop(response)
+            }
+            if (!compact_session_history(session$history, force = TRUE,
+                    reason = "request_buffer_overflow")) {
+                stop(response)
+            }
+            recovered_usage <- .turn_add_usage(recovered_usage,
+                attempt_checkpoint_usage)
+            recovered_turns <- recovered_turns + attempt_checkpoint_turns
+            request_buffer_retries <- request_buffer_retries + 1L
+            # Preserve a named NULL: llm.api treats it as continuation and
+            # does not append the original user prompt a second time.
+            args["prompt"] <- list(NULL)
+            args$history <- session$history
+            args$max_turns <- max(1L, max_turns - recovered_turns)
+            response <- call_agent(args)
+        }
+        if (inherits(response, "error")) {
+            stop(response)
+        }
+        if (request_buffer_retries > 0L) {
+            response$usage <- .turn_add_usage(recovered_usage, response$usage)
+            response$turns <- recovered_turns +
+            as.integer(response$turns %||% 0L)
+            response$corteza_request_buffer_retries <-
+            request_buffer_retries
+            response$corteza_overflow_retry <- TRUE
+            response$corteza_overflow_recovered <- TRUE
+        }
+        response
+    }
+    response <- call_agent_request_safe(agent_args)
 
     # Pi pairs proactive threshold compaction with one compact-and-retry on an
     # actual context overflow. llm.api deliberately excludes the incomplete
@@ -1161,7 +1225,10 @@ turn <- function(prompt, session, tool_executor = NULL, tools = NULL) {
             # required argument.
             retry_args["prompt"] <- list(NULL)
             retry_args$history <- session$history
-            response <- .agent_with_fallback(retry_args, session)
+            retry_args$max_turns <- max(
+                                        1L, as.integer(agent_args$max_turns) -
+                                        as.integer(overflow_response$turns %||% 0L))
+            response <- call_agent_request_safe(retry_args)
             response$usage <- .turn_add_usage(overflow_response$usage,
                 response$usage)
             response$turns <- as.integer(overflow_response$turns %||% 0L) +
@@ -1170,6 +1237,10 @@ turn <- function(prompt, session, tool_executor = NULL, tools = NULL) {
                                     response$citations %||% list())
             response$searches <- c(overflow_response$searches %||% list(),
                                    response$searches %||% list())
+            response$corteza_request_buffer_retries <-
+            as.integer(overflow_response$corteza_request_buffer_retries %||%
+                       0L) +
+            as.integer(response$corteza_request_buffer_retries %||% 0L)
             response$corteza_overflow_retry <- TRUE
             response$corteza_overflow_recovered <- !(
                 isTRUE(response$truncated) &&

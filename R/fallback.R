@@ -176,6 +176,17 @@
           msg, ignore.case = TRUE)
 }
 
+# The Codex gateway can exhaust its serialized request buffer before the model
+# reports a token-window overflow. This is context pressure, not provider
+# capacity: switching models or waiting cannot help, but compacting the exact
+# history mirrored by history_callback can.
+.is_request_buffer_error <- function(e) {
+    msg <- conditionMessage(e)
+    grepl("request buffer limit", msg, ignore.case = TRUE) &&
+    (grepl("API error \\(507\\)", msg) ||
+        grepl("exceeded request buffer", msg, ignore.case = TRUE))
+}
+
 .fallback_mark <- function(provider, minutes, now = Sys.time()) {
     assign(provider, now + minutes * 60, envir = .fallback_state)
     invisible(NULL)

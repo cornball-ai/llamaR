@@ -314,6 +314,25 @@ estimate_live_context_tokens <- function(session, system_prompt = NULL,
     as.integer(sys_tok + tools_tok + history_tok)
 }
 
+# Approximate the serialized model request size before provider-specific HTTP
+# wrapping. Unlike the token estimate above, this deliberately retains opaque
+# Codex encrypted reasoning: the gateway has to buffer those bytes even though
+# they do not tokenize like natural-language text.
+.estimate_live_request_bytes <- function(session, system_prompt = NULL,
+    tools = NULL) {
+    messages <- session$messages %||% session$history %||% list()
+    payload <- list(system = system_prompt %||% "", tools = tools %||% list(),
+                    history = messages)
+    json <- tryCatch(
+                     jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null"),
+                     error = function(e) NA_character_
+    )
+    if (length(json) != 1L || is.na(json)) {
+        return(NA_real_)
+    }
+    as.numeric(nchar(json, type = "bytes", allowNA = FALSE))
+}
+
 #' Percent of a model's context window used by a session.
 #'
 #' Convenience wrapper around [estimate_live_context_tokens()] and

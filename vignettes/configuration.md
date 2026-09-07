@@ -127,6 +127,8 @@ All keys shown with type and default, current as of corteza 0.6.3. Most defaults
 | `context_high_pct` | integer | `90` | Token-usage % for orange indicator |
 | `context_crit_pct` | integer | `95` | Token-usage % for red indicator + hint to `/clear` |
 | `context_compact_pct` | integer | `90` | Auto-compaction threshold |
+| `context_compact_bytes` | integer | `900000` | Serialized-history compaction guard for the Codex transport |
+| `context_request_buffer_retries` | integer | `3` | Forced compact-and-continue attempts after a Codex request-buffer error |
 | `context_include_soul` | boolean or null | null | Include `SOUL.md` (null = saber default) |
 | `context_include_user` | boolean or null | null | Include `USER.md` (null = saber default) |
 | `instruction_roots` | object | `{}` | Additional named roots for lazily loaded `SKILL.md` instructions |

@@ -297,8 +297,8 @@ compact_summarize_slice <- function(slice, provider = "anthropic",
                       provider = provider,
                       model = model,
                       system = paste(
-                          "You are a helpful assistant that creates",
-                          "concise conversation summaries."))
+                                     "You are a helpful assistant that creates",
+                                     "concise conversation summaries."))
     # The subscription Codex endpoint rejects sampling controls. Keep the
     # summarizer compatible with both current and older llm.api releases.
     if (!identical(provider, "openai_codex")) {
@@ -357,7 +357,7 @@ compact_rewrite_history <- function(history, cut, summary) {
 #' Decision points:
 #'   - Compaction mode off → return invisibly without checking.
 #'   - History shorter than `min_messages` → skip (nothing to gain).
-#'   - Live token usage below threshold → skip.
+#'   - Live token usage and serialized request size below thresholds → skip.
 #'   - No safe cut available (e.g. open tool_use) → skip.
 #'   - Summarizer fails → log and leave history intact.
 #'
@@ -375,6 +375,9 @@ compact_rewrite_history <- function(history, cut, summary) {
 #' @param threshold Optional explicit percentage. When omitted, parent/direct
 #'   sessions use `config$context_compact_pct` and subagents use their stricter
 #'   inherited policy. Explicit NULL disables compaction.
+#' @param byte_limit Optional serialized-request threshold. When omitted,
+#'   `config$context_compact_bytes` applies to `openai_codex`; other providers
+#'   have no byte threshold. Explicit `Inf` disables the byte guard.
 #' @param min_messages Optional minimum history entries. The ordinary policy
 #'   uses its configured value; forced overflow recovery may lower this because
 #'   a few individual entries can themselves exceed the context window.
@@ -382,7 +385,7 @@ compact_rewrite_history <- function(history, cut, summary) {
 #' @keywords internal
 maybe_compact_turn_session <- function(session, config, kind = NULL,
                                        tools = NULL, system = NULL,
-                                       threshold, min_messages,
+                                       threshold, byte_limit, min_messages,
                                        reason = "threshold") {
     if (identical(kind, "archive_holder")) {
         return(invisible(FALSE))
@@ -423,6 +426,21 @@ maybe_compact_turn_session <- function(session, config, kind = NULL,
     system_for_estimate <- system %||% session$system
     used <- estimate_live_context_tokens(list(history = history),
         system_prompt = system_for_estimate, tools = tools_for_estimate)
+    if (missing(byte_limit)) {
+        byte_limit <- if (identical(session$provider, "openai_codex")) {
+            as.numeric(config$context_compact_bytes %||% 900000L)
+        } else {
+            Inf
+        }
+    }
+    byte_limit <- suppressWarnings(as.numeric(byte_limit)[1L])
+    if (!length(byte_limit) || is.na(byte_limit) ||
+        !is.finite(byte_limit) || byte_limit <= 0) {
+        byte_limit <- NA_real_
+    }
+    request_bytes <- .estimate_live_request_bytes(
+        list(history = history), system_prompt = system_for_estimate,
+        tools = tools_for_estimate)
     limit <- session$context_window %||% config$context_window %||%
     context_limit_for_model(model, provider = session$provider)
     if (is.null(limit) || limit <= 0L) {
@@ -430,8 +448,19 @@ maybe_compact_turn_session <- function(session, config, kind = NULL,
     } else {
         pct <- 100 * used / limit
     }
-    if (pct < threshold) {
+    token_pressure <- pct >= threshold
+    byte_pressure <- !is.na(byte_limit) && !is.na(request_bytes) &&
+    request_bytes >= byte_limit
+    if (!token_pressure && !byte_pressure) {
         return(invisible(FALSE))
+    }
+    forced_reason <- reason %in% c("context_overflow", "request_buffer_overflow")
+    trigger <- if (forced_reason) {
+        "forced"
+    } else if (byte_pressure) {
+        "request_bytes"
+    } else {
+        "tokens"
     }
     cut <- compact_find_cut(history,
                             keep_recent_turns = cc$keep_recent_turns %||% 1L,
@@ -454,25 +483,27 @@ maybe_compact_turn_session <- function(session, config, kind = NULL,
         failure <- list(
                         reason = "summarizer_error",
                         error = if (is.null(summary_error)) {
-                            "summarizer returned no usable summary"
-                        } else {
-                            conditionMessage(summary_error)
-                        },
+                "summarizer returned no usable summary"
+            } else {
+                conditionMessage(summary_error)
+            },
                         tokens_before = used,
+                        request_bytes = request_bytes,
+                        byte_limit = byte_limit,
+                        trigger = trigger,
                         threshold_pct = threshold,
                         context_pct = pct,
                         context_window = limit,
                         provider = session$provider,
                         model = model,
-                        timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ",
-                                           tz = "UTC")
+                        timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
         )
         session$last_compaction_failure <- failure
         if (is.function(session$on_compaction_failure)) {
             tryCatch(session$on_compaction_failure(failure),
                      error = function(e) log_event(
-                         "subagent_compact_failure_hook_failed",
-                         error = conditionMessage(e), level = "warn"))
+                    "subagent_compact_failure_hook_failed",
+                    error = conditionMessage(e), level = "warn"))
         }
         return(invisible(FALSE))
     }
@@ -485,6 +516,9 @@ maybe_compact_turn_session <- function(session, config, kind = NULL,
                   history_after = rewritten,
                   cut = cut,
                   tokens_before = used,
+                  request_bytes = request_bytes,
+                  byte_limit = byte_limit,
+                  trigger = trigger,
                   threshold_pct = threshold,
                   context_pct = pct,
                   context_window = limit,
