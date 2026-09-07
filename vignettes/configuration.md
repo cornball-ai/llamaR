@@ -127,8 +127,12 @@ All keys shown with type and default, current as of corteza 0.6.3. Most defaults
 | `context_high_pct` | integer | `90` | Token-usage % for orange indicator |
 | `context_crit_pct` | integer | `95` | Token-usage % for red indicator + hint to `/clear` |
 | `context_compact_pct` | integer | `90` | Auto-compaction threshold |
+| `context_compact_bytes` | integer | `900000` | Serialized-history compaction guard for the Codex transport |
+| `context_request_buffer_retries` | integer | `3` | Forced compact-and-continue attempts after a Codex request-buffer error |
 | `context_include_soul` | boolean or null | null | Include `SOUL.md` (null = saber default) |
 | `context_include_user` | boolean or null | null | Include `USER.md` (null = saber default) |
+| `instruction_roots` | object | `{}` | Additional named roots for lazily loaded `SKILL.md` instructions |
+| `instruction_disabled` | string[] | `[]` | Exact stable instruction ids to omit |
 
 ### Safety
 
@@ -144,7 +148,7 @@ All keys shown with type and default, current as of corteza 0.6.3. Most defaults
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `skill_paths` | string[] | `[]` | Extra directories for `SKILL.md` files |
+| `skill_paths` | string[] | `[]` | Legacy executable/file-skill configuration |
 | `skill_packages` | object[] | `[{"package":"base", ...}, {"package":"utils", ...}]` | R packages registered as tools |
 | `skill_timeout` | integer | `30` | Default skill execution timeout (seconds) |
 
@@ -258,18 +262,48 @@ In-chat commands prefixed with `/`.
 | `/outputs` | List recent tool outputs |
 | `/help` | Show help |
 
-## Skills
+## Instruction skills
 
-Skills are `SKILL.md` files loaded at startup. Built-in R skills are always registered.
-
-**Search paths:**
+Instruction skills are exact `SKILL.md` files discovered recursively at
+session startup. Built-in roots are:
 
 | Scope | Path |
 |-------|------|
 | Global | `tools::R_user_dir("corteza", "data")/skills/` |
 | Project | `.corteza/skills/` |
 
-Nested (`skill/SKILL.md`) and flat (`skill.md`) layouts both work.
+Only compact metadata enters the system prompt. The agent calls the read-only
+`skill_instructions` tool with the displayed stable id when it needs the
+body, or supplies a relative `resource` path for a supporting file. The
+catalog and hashes are fixed for the session; restart or an archival context
+refresh creates a new snapshot.
+
+Additional roots must be explicit and named:
+
+```json
+{
+  "instruction_roots": {
+    "shared": "../../skills",
+    "team": "/srv/team/instructions"
+  },
+  "instruction_disabled": [
+    "shared:deploy/production"
+  ]
+}
+```
+
+An entry at `<root>/analysis/logs/SKILL.md` has id
+`<root-id>:analysis/logs`. A `SKILL.md` directly in the root has the
+root id. Project roots override global roots with the same id; disabled ids
+from both configs are combined and cannot be re-enabled by the project.
+Relative paths in global config resolve from the global config directory;
+project paths resolve from the project working directory. The built-in ids
+`corteza-data` and `project` are reserved. corteza does not implicitly
+scan `~/skills`.
+
+Instruction documents are not executable tools. They can teach the model to
+use tools it already has, but do not add capabilities to the executable tool
+registry.
 
 **Package skills:** register R packages as tools via `skill_packages` in config.
 
